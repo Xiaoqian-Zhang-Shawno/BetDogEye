@@ -940,9 +940,12 @@ function renderRadar(factors) {
       <polygon points="${points.map((p) => `${p.x},${p.y}`).join(" ")}" fill="rgba(207,63,53,0.17)" stroke="#cf3f35" stroke-width="3"></polygon>
       ${points
         .map(
-          (p) => `
+          (p, index) => `
             <circle cx="${p.x}" cy="${p.y}" r="4" fill="${p.color}"></circle>
-            <text x="${p.lx}" y="${p.ly + 3}" text-anchor="middle" fill="#3a4048" font-size="9" font-weight="800">${points.indexOf(p) + 1}</text>
+            <g class="radar-axis-badge" transform="translate(${p.lx} ${p.ly})">
+              <circle r="12" fill="${p.color}"></circle>
+              <text y="4.5" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="900">${index + 1}</text>
+            </g>
           `
         )
         .join("")}
