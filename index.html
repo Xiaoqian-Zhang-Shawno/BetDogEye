@@ -157,8 +157,15 @@
 
               <div class="field-grid">
                 <label>
-                  比赛
-                  <input id="matchName" required placeholder="例如：A队 vs B队" />
+                  投注类型
+                  <select id="betType">
+                    <option value="single">单关</option>
+                    <option value="parlay">混合过关</option>
+                  </select>
+                </label>
+                <label>
+                  比赛 / 过关名称
+                  <input id="matchName" required placeholder="例如：A队 vs B队 / 世界杯 3串1" />
                 </label>
                 <label>
                   比赛日期
@@ -173,7 +180,11 @@
                   <select id="marketType">
                     <option value="胜平负">胜平负</option>
                     <option value="让球胜平负">让球胜平负</option>
+                    <option value="总进球">总进球</option>
+                    <option value="半全场">半全场</option>
+                    <option value="比分">比分</option>
                     <option value="二选一">二选一</option>
+                    <option value="混合过关">混合过关</option>
                     <option value="其他输赢盘">其他输赢盘</option>
                   </select>
                 </label>
@@ -220,6 +231,23 @@
                   </select>
                 </label>
               </div>
+
+              <section id="parlayPanel" class="parlay-panel hidden" aria-label="混合过关明细">
+                <div class="parlay-head">
+                  <div>
+                    <p class="panel-label">Mixed Pass</p>
+                    <h4>混合过关明细</h4>
+                  </div>
+                  <button id="addParlayLegBtn" class="button ghost" type="button">添加一关</button>
+                </div>
+                <div class="parlay-summary">
+                  <span id="parlayLegCount" class="mini-badge">0 关</span>
+                  <span>综合赔率 <strong id="parlayOddsValue">--</strong></span>
+                  <span>联合胜率 <strong id="parlayProbValue">--</strong></span>
+                  <span>估算最高可中 <strong id="parlayPayoutValue">--</strong></span>
+                </div>
+                <div id="parlayLegList" class="parlay-leg-list"></div>
+              </section>
 
               <label class="full-field">
                 备注
