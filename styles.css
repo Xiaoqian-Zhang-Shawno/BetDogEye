@@ -676,6 +676,63 @@ textarea:focus {
   margin-bottom: 10px;
 }
 
+.parlay-panel {
+  margin: 4px 0 14px;
+  padding: 12px;
+  border: 1px solid #d9e2d7;
+  border-radius: var(--radius);
+  background: #fbfcfa;
+}
+
+.parlay-head,
+.parlay-leg-title,
+.parlay-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.parlay-summary {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.parlay-summary strong {
+  color: var(--ink);
+}
+
+.parlay-leg-list {
+  display: grid;
+  gap: 10px;
+}
+
+.parlay-leg {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.parlay-leg-title {
+  margin-bottom: 10px;
+}
+
+.parlay-leg-title strong {
+  margin-right: auto;
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.parlay-leg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .compact-actions {
   align-items: center;
   justify-content: flex-start;
@@ -732,7 +789,7 @@ textarea:focus {
 
 table {
   width: 100%;
-  min-width: 880px;
+  min-width: 980px;
   border-collapse: collapse;
 }
 
@@ -760,6 +817,15 @@ td strong {
 
 td small {
   color: var(--muted);
+}
+
+.parlay-mini {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.32;
 }
 
 .row-actions {
@@ -952,6 +1018,16 @@ td small {
 
   .field-grid,
   .field-grid.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .parlay-head,
+  .parlay-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .parlay-leg-grid {
     grid-template-columns: 1fr;
   }
 }
