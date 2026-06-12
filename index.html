@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="BetDogEye - 体育彩票输赢投注记录、收益测算、风险因子挖掘与对冲策略工具"
+    />
+    <meta name="theme-color" content="#10131a" />
+    <title>BetDogEye | 投注收益与风险策略</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">BD</div>
+          <div>
+            <p class="eyebrow">World Cup Risk Desk</p>
+            <h1>BetDogEye</h1>
+          </div>
+        </div>
+
+        <nav class="nav-tabs" id="navTabs" aria-label="功能页签">
+          <button class="nav-tab active" data-view="dashboard" type="button">
+            <span class="tab-icon">◇</span>
+            仪表盘
+          </button>
+          <button class="nav-tab" data-view="ledger" type="button">
+            <span class="tab-icon">＋</span>
+            下注记录
+          </button>
+          <button class="nav-tab" data-view="intel" type="button">
+            <span class="tab-icon">⌕</span>
+            风险情报
+          </button>
+          <button class="nav-tab" data-view="strategy" type="button">
+            <span class="tab-icon">⇄</span>
+            策略建议
+          </button>
+        </nav>
+
+        <div class="sidebar-panel">
+          <p class="panel-label">资金纪律</p>
+          <div class="discipline-meter">
+            <div class="meter-track">
+              <span id="disciplineFill"></span>
+            </div>
+            <div class="meter-row">
+              <strong id="disciplineScore">--</strong>
+              <span id="disciplineLabel">等待数据</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">输赢盘 · 资金回撤 · 爆冷风险</p>
+            <h2 id="viewTitle">组合仪表盘</h2>
+          </div>
+          <div class="topbar-actions">
+            <button id="seedDemoBtn" class="button ghost" type="button" title="载入示例组合">
+              示例
+            </button>
+            <button id="exportJsonBtn" class="button ghost" type="button" title="导出 JSON 数据">
+              导出
+            </button>
+            <label class="button ghost import-label" title="导入 JSON 数据">
+              导入
+              <input id="importJsonInput" type="file" accept="application/json" />
+            </label>
+          </div>
+        </header>
+
+        <section id="dashboardView" class="view active" aria-labelledby="dashboardHeading">
+          <div class="section-head">
+            <div>
+              <h3 id="dashboardHeading">收益风险总览</h3>
+              <p>跟踪下注支出、最大可中、已结算盈亏、期望收益和集中风险。</p>
+            </div>
+            <div class="status-pill" id="portfolioStatus">计算中</div>
+          </div>
+
+          <div class="kpi-grid" id="kpiGrid"></div>
+
+          <div class="analytics-grid">
+            <article class="chart-panel wide">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-label">组合现金流</p>
+                  <h4>累计实际盈亏</h4>
+                </div>
+                <span id="cashflowBadge" class="mini-badge">--</span>
+              </div>
+              <div id="cashflowChart" class="chart chart-line"></div>
+            </article>
+
+            <article class="chart-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-label">资金分布</p>
+                  <h4>状态占用</h4>
+                </div>
+              </div>
+              <div id="statusDonut" class="chart donut-wrap"></div>
+            </article>
+
+            <article class="chart-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-label">风险暴露</p>
+                  <h4>按比赛聚合</h4>
+                </div>
+              </div>
+              <div id="exposureBars" class="chart bars-wrap"></div>
+            </article>
+
+            <article class="chart-panel wide">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-label">价值矩阵</p>
+                  <h4>EV 与风险分</h4>
+                </div>
+                <span class="mini-badge">圆点越大，下注越重</span>
+              </div>
+              <div id="evScatter" class="chart scatter-wrap"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="ledgerView" class="view" aria-labelledby="ledgerHeading">
+          <div class="section-head">
+            <div>
+              <h3 id="ledgerHeading">下注记录</h3>
+              <p>记录下注金额、最高可中、实际支出收入，自动计算赔率、ROI、EV 和仓位压力。</p>
+            </div>
+            <div class="view-actions">
+              <button id="newBetBtn" class="button primary" type="button">新增记录</button>
+              <button id="exportCsvBtn" class="button ghost" type="button">导出 CSV</button>
+            </div>
+          </div>
+
+          <div class="ledger-layout">
+            <form id="betForm" class="form-panel" autocomplete="off">
+              <input id="betId" type="hidden" />
+              <div class="form-title-row">
+                <div>
+                  <p class="panel-label">Record Editor</p>
+                  <h4 id="betFormTitle">新增下注</h4>
+                </div>
+                <button id="resetBetFormBtn" class="icon-button" type="button" title="清空表单">×</button>
+              </div>
+
+              <div class="field-grid">
+                <label>
+                  比赛
+                  <input id="matchName" required placeholder="例如：A队 vs B队" />
+                </label>
+                <label>
+                  比赛日期
+                  <input id="matchDate" type="date" required />
+                </label>
+                <label>
+                  投注选择
+                  <input id="pickName" required placeholder="主胜 / 客胜 / 平局" />
+                </label>
+                <label>
+                  玩法
+                  <select id="marketType">
+                    <option value="胜平负">胜平负</option>
+                    <option value="让球胜平负">让球胜平负</option>
+                    <option value="二选一">二选一</option>
+                    <option value="其他输赢盘">其他输赢盘</option>
+                  </select>
+                </label>
+                <label>
+                  下注金额
+                  <input id="stake" type="number" min="0" step="1" required placeholder="500" />
+                </label>
+                <label>
+                  最高可中金额
+                  <input id="maxPayout" type="number" min="0" step="1" required placeholder="920" />
+                </label>
+                <label>
+                  实际支出
+                  <input id="actualOutflow" type="number" min="0" step="1" required placeholder="500" />
+                </label>
+                <label>
+                  实际收入
+                  <input id="actualIncome" type="number" min="0" step="1" placeholder="0" />
+                </label>
+                <label>
+                  主观胜率 %
+                  <input id="subjectiveProb" type="number" min="1" max="99" step="1" required />
+                </label>
+                <label>
+                  状态
+                  <select id="betStatus">
+                    <option value="open">未结算</option>
+                    <option value="won">已中奖</option>
+                    <option value="lost">未中奖</option>
+                    <option value="cashed">提前兑付</option>
+                    <option value="void">作废</option>
+                  </select>
+                </label>
+                <label>
+                  相关性分组
+                  <input id="correlationGroup" placeholder="例如：同场 / 同球队 / 串关" />
+                </label>
+                <label>
+                  信心等级
+                  <select id="confidence">
+                    <option value="low">低</option>
+                    <option value="medium" selected>中</option>
+                    <option value="high">高</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="full-field">
+                备注
+                <textarea id="betNotes" rows="3" placeholder="赔率变化、临场情报、投注理由"></textarea>
+              </label>
+
+              <div class="form-actions">
+                <button class="button primary" type="submit">保存记录</button>
+                <button id="deleteBetBtn" class="button danger hidden" type="button">删除</button>
+              </div>
+            </form>
+
+            <div class="table-panel">
+              <div class="table-toolbar">
+                <label class="search-field">
+                  <span>搜索</span>
+                  <input id="ledgerSearch" placeholder="比赛、选择、玩法" />
+                </label>
+                <label>
+                  状态筛选
+                  <select id="ledgerStatusFilter">
+                    <option value="all">全部</option>
+                    <option value="open">未结算</option>
+                    <option value="won">已中奖</option>
+                    <option value="lost">未中奖</option>
+                    <option value="cashed">提前兑付</option>
+                    <option value="void">作废</option>
+                  </select>
+                </label>
+              </div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>比赛</th>
+                      <th>选择</th>
+                      <th>支出</th>
+                      <th>最高可中</th>
+                      <th>EV</th>
+                      <th>风险</th>
+                      <th>状态</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="ledgerRows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="intelView" class="view" aria-labelledby="intelHeading">
+          <div class="section-head">
+            <div>
+              <h3 id="intelHeading">风险情报挖掘</h3>
+              <p>粘贴新闻、伤停、阵容、舆情或更衣室信息，系统会按风险因子归类并更新比赛风险分。</p>
+            </div>
+          </div>
+
+          <div class="intel-layout">
+            <form id="intelForm" class="form-panel">
+              <div class="form-title-row">
+                <div>
+                  <p class="panel-label">Local Factor Miner</p>
+                  <h4>粘贴赛前情报</h4>
+                </div>
+              </div>
+              <div class="field-grid compact">
+                <label>
+                  关联比赛
+                  <select id="intelMatch"></select>
+                </label>
+                <label>
+                  来源可信度
+                  <select id="sourceReliability">
+                    <option value="0.9">官方 / 一线记者</option>
+                    <option value="0.75" selected>主流媒体</option>
+                    <option value="0.55">社媒传闻</option>
+                    <option value="0.35">低可信来源</option>
+                  </select>
+                </label>
+              </div>
+              <div class="ai-config">
+                <div class="ai-config-head">
+                  <div>
+                    <p class="panel-label">DeepSeek API</p>
+                    <h4>AI 深度风险分析</h4>
+                  </div>
+                  <span id="aiStatus" class="mini-badge">检测中</span>
+                </div>
+                <div class="field-grid compact">
+                  <label>
+                    API Key
+                    <input id="deepseekKey" type="password" placeholder="sk-..." autocomplete="off" />
+                  </label>
+                  <label>
+                    模型
+                    <input id="deepseekModel" value="deepseek-chat" />
+                  </label>
+                  <label class="full-span">
+                    Base URL
+                    <input id="deepseekBaseUrl" value="https://api.deepseek.com" />
+                  </label>
+                </div>
+                <div class="form-actions compact-actions">
+                  <button id="saveDeepseekKeyBtn" class="button ghost" type="button">保存密钥到本机</button>
+                  <span id="aiConfigMessage" class="fine-print"></span>
+                </div>
+              </div>
+              <label class="full-field">
+                情报文本
+                <textarea
+                  id="intelText"
+                  rows="8"
+                  placeholder="例如：主力前锋训练中受伤，队内对主帅战术安排有分歧，连续客场体能压力较大..."
+                  required
+                ></textarea>
+              </label>
+              <div class="form-actions">
+                <button class="button primary" type="submit">挖掘风险因子</button>
+                <button id="deepseekAnalyzeBtn" class="button ghost" type="button">DeepSeek 分析</button>
+                <button id="clearIntelBtn" class="button ghost" type="button">清空情报</button>
+              </div>
+              <p class="fine-print">
+                DeepSeek 请求只会发送你粘贴的情报、当前比赛名称和组合摘要，不会发送完整本地备份。
+              </p>
+            </form>
+
+            <div class="risk-board">
+              <article class="chart-panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-label">风险雷达</p>
+                    <h4>因子强度</h4>
+                  </div>
+                </div>
+                <div id="riskRadar" class="chart radar-wrap"></div>
+              </article>
+              <article class="chart-panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-label">爆冷触发器</p>
+                    <h4>高危因子</h4>
+                  </div>
+                </div>
+                <div id="factorList" class="factor-list"></div>
+                <div id="aiInsightList" class="factor-list ai-insights"></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="strategyView" class="view" aria-labelledby="strategyHeading">
+          <div class="section-head">
+            <div>
+              <h3 id="strategyHeading">金融收益策略</h3>
+              <p>用期望收益、分数 Kelly、仓位上限和对冲成本来判断是否追加、持有或降风险。</p>
+            </div>
+          </div>
+
+          <div class="strategy-layout">
+            <form id="settingsForm" class="form-panel compact-panel">
+              <div class="form-title-row">
+                <div>
+                  <p class="panel-label">Portfolio Controls</p>
+                  <h4>资金参数</h4>
+                </div>
+              </div>
+              <div class="field-grid compact">
+                <label>
+                  总预算
+                  <input id="bankroll" type="number" min="0" step="100" />
+                </label>
+                <label>
+                  单场上限 %
+                  <input id="perMatchCapPct" type="number" min="1" max="80" step="1" />
+                </label>
+                <label>
+                  止损线
+                  <input id="stopLoss" type="number" min="0" step="100" />
+                </label>
+                <label>
+                  对冲参考赔率
+                  <input id="hedgeOdds" type="number" min="1.01" step="0.01" />
+                </label>
+                <label>
+                  风险偏好
+                  <select id="riskProfile">
+                    <option value="conservative">保守</option>
+                    <option value="balanced">均衡</option>
+                    <option value="aggressive">进取</option>
+                  </select>
+                </label>
+                <label>
+                  最大风险暴露 %
+                  <input id="maxPortfolioRiskPct" type="number" min="1" max="100" step="1" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button class="button primary" type="submit">保存参数</button>
+              </div>
+            </form>
+
+            <div class="recommendation-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-label">Action Desk</p>
+                  <h4>下注与对冲建议</h4>
+                </div>
+                <span id="strategyCount" class="mini-badge">--</span>
+              </div>
+              <div id="recommendations" class="recommendations"></div>
+            </div>
+          </div>
+        </section>
+
+        <footer class="footer-note">
+          <span>理性投注：本工具只做记录、测算和风险提示，不保证盈利，不替代个人判断。</span>
+          <span id="lastSaved">未保存</span>
+        </footer>
+      </main>
+    </div>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

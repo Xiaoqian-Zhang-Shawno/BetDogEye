@@ -1,0 +1,9 @@
+{
+  "name": "BetDogEye 投注收益与风险策略",
+  "short_name": "BetDogEye",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f5f7f3",
+  "theme_color": "#10131a",
+  "description": "体育彩票输赢投注记录、收益测算、风险因子挖掘与对冲策略工具"
+}
