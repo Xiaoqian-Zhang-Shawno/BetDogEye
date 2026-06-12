@@ -766,17 +766,35 @@ function renderScatter(target, bets) {
   const minEv = Math.min(-30, ...evs);
   const maxEv = Math.max(30, ...evs);
   const maxStake = Math.max(...bets.map((bet) => bet.actualOutflow), 1);
+  const plotted = [];
   const nodes = bets
     .map((bet, index) => {
       const x = pad + ((bet.roiExpected * 100 - minEv) / (maxEv - minEv || 1)) * (width - pad * 2);
-      const y = height - pad - bet.riskScore * (height - pad * 2);
+      let y = height - pad - bet.riskScore * (height - pad * 2);
       const r = 6 + (bet.actualOutflow / maxStake) * 12;
+      const nearby = plotted.filter((point) => Math.abs(point.x - x) < 28 && Math.abs(point.y - y) < 24).length;
+      if (nearby) {
+        y = clamp(y + (nearby % 2 ? 1 : -1) * Math.ceil(nearby / 2) * 18, pad + r, height - pad - r);
+      }
+      plotted.push({ x, y });
       const color = bet.expectedProfit >= 0 ? "#1f9d72" : "#cf3f35";
       return `
-        <g>
+        <g aria-label="${escapeSvg(bet.matchName)}">
           <circle cx="${x}" cy="${y}" r="${r}" fill="${color}" opacity="0.78"></circle>
-          <text x="${x + r + 4}" y="${y + 4}" fill="#3a4048" font-size="11">${escapeSvg(shortName(bet.matchName))}</text>
+          <text x="${x}" y="${y + 4}" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="800">${index + 1}</text>
         </g>
+      `;
+    })
+    .join("");
+  const legend = bets
+    .map((bet, index) => {
+      const tone = bet.expectedProfit >= 0 ? "amount-positive" : "amount-negative";
+      return `
+        <div class="scatter-legend-row">
+          <span class="scatter-index">${index + 1}</span>
+          <span class="scatter-name">${escapeHtml(bet.matchName)} · ${escapeHtml(bet.pickName)}</span>
+          <strong class="${tone}">${signedMoney(bet.expectedProfit)}</strong>
+        </div>
       `;
     })
     .join("");
@@ -792,6 +810,7 @@ function renderScatter(target, bets) {
       <text x="${width - pad - 44}" y="${height - 8}" fill="#6c7280" font-size="11">高 EV</text>
       <text x="6" y="${pad + 8}" fill="#6c7280" font-size="11">高风险</text>
     </svg>
+    <div class="scatter-legend">${legend}</div>
   `;
 }
 
@@ -899,8 +918,19 @@ function renderRadar(factors) {
     els.riskRadar.innerHTML = empty("暂无风险因子，先粘贴赛前情报");
     return;
   }
+  const legend = totals
+    .map(
+      (item, index) => `
+        <div class="radar-legend-row">
+          <span class="scatter-index" style="background:${item.color}">${index + 1}</span>
+          <span>${escapeHtml(item.name)}</span>
+          <strong>${NUMBER.format(item.value)}</strong>
+        </div>
+      `
+    )
+    .join("");
   els.riskRadar.innerHTML = `
-    <svg viewBox="0 0 ${size} ${size}" role="img" aria-label="风险因子雷达图">
+    <svg class="radar-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="风险因子雷达图">
       ${points
         .map(
           (p) =>
@@ -912,11 +942,12 @@ function renderRadar(factors) {
         .map(
           (p) => `
             <circle cx="${p.x}" cy="${p.y}" r="4" fill="${p.color}"></circle>
-            <text x="${p.lx}" y="${p.ly}" text-anchor="middle" fill="#3a4048" font-size="10">${escapeSvg(p.name.slice(0, 4))}</text>
+            <text x="${p.lx}" y="${p.ly + 3}" text-anchor="middle" fill="#3a4048" font-size="9" font-weight="800">${points.indexOf(p) + 1}</text>
           `
         )
         .join("")}
     </svg>
+    <div class="radar-legend">${legend}</div>
   `;
 }
 
