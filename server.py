@@ -354,10 +354,15 @@ def refresh_portfolio_news_items(payload: dict[str, Any]) -> list[dict[str, str]
 
 
 def extract_terms_from_bet(bet: dict[str, Any]) -> list[str]:
-    text = " ".join(
+    parts = [
         str(bet.get(key) or "")
-        for key in ("matchName", "pickName", "marketType", "correlationGroup")
-    )
+        for key in ("matchName", "pickName", "marketType", "correlationGroup", "betType")
+    ]
+    for leg in bet.get("parlayLegs") or []:
+        if not isinstance(leg, dict):
+            continue
+        parts.extend(str(leg.get(key) or "") for key in ("matchName", "pickName", "marketType"))
+    text = " ".join(parts)
     return extract_terms_from_text(text)
 
 
@@ -368,6 +373,9 @@ def extract_terms_from_text(text: str) -> list[str]:
         text,
         flags=re.IGNORECASE,
     )
+    cleaned = re.sub(r"\b(parlay|single)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\d+\s*串\s*\d+", " ", cleaned)
+    cleaned = re.sub(r"(混合过关|过关|串关|单关)", " ", cleaned)
     cleaned = re.sub(r"[胜负平让球主客不败单关串关玩法投注选择]+", " ", cleaned)
     parts = re.split(r"\s+|/|,|，|、|\||-|—|:|：|vs\.?|VS|对|与", cleaned)
     terms: list[str] = []
