@@ -305,15 +305,23 @@
               <div class="ai-config">
                 <div class="ai-config-head">
                   <div>
-                    <p class="panel-label">DeepSeek API</p>
-                    <h4>AI 深度风险分析</h4>
+                    <p class="panel-label">OpenAI-compatible API</p>
+                    <h4>模型 API 与情报刷新</h4>
                   </div>
                   <span id="aiStatus" class="mini-badge">检测中</span>
                 </div>
                 <div class="field-grid compact">
                   <label>
+                    供应商
+                    <select id="llmProvider">
+                      <option value="DeepSeek">DeepSeek</option>
+                      <option value="OpenAI">OpenAI / GPT</option>
+                      <option value="OpenAI-compatible">其他兼容接口</option>
+                    </select>
+                  </label>
+                  <label>
                     API Key
-                    <input id="deepseekKey" type="password" placeholder="sk-..." autocomplete="off" />
+                    <input id="deepseekKey" type="password" placeholder="模型 API Key" autocomplete="off" />
                   </label>
                   <label>
                     模型
@@ -340,12 +348,13 @@
               </label>
               <div class="form-actions">
                 <button id="refreshIntelBtn" class="button ghost" type="button">刷新网络情报</button>
+                <button id="refreshOpenBetsBtn" class="button ghost" type="button">刷新未结算组合</button>
                 <button class="button primary" type="submit">挖掘风险因子</button>
-                <button id="deepseekAnalyzeBtn" class="button ghost" type="button">DeepSeek 分析</button>
+                <button id="deepseekAnalyzeBtn" class="button ghost" type="button">模型分析</button>
                 <button id="clearIntelBtn" class="button ghost" type="button">清空情报</button>
               </div>
               <p class="fine-print">
-                刷新网络情报会查询公开新闻 RSS，并把搜索结果标题、摘要和链接交给 DeepSeek 归纳。
+                组合刷新只搜索未结算下注中的相关球队/国家，并覆盖政治、金融、花边、伤停和更衣室因素。
               </p>
             </form>
 

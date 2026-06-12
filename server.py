@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Static app server plus a local DeepSeek proxy.
+"""Static app server plus a local OpenAI-compatible model proxy.
 
-The browser never receives the DeepSeek API key. The key is read from the
-process environment or from .env.local in this workspace.
+The browser never receives model API keys. Keys are read from the process
+environment or from .env.local in this workspace.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parent
 ENV_FILE = ROOT / ".env.local"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_PROVIDER = "DeepSeek"
 NEWS_TIMEOUT_SECONDS = 8
 MAX_NEWS_ITEMS = 12
 
@@ -47,19 +48,34 @@ def read_local_env() -> dict[str, str]:
 def get_config() -> dict[str, str]:
     local = read_local_env()
     return {
-        "api_key": local.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_API_KEY", ""),
-        "base_url": local.get("DEEPSEEK_BASE_URL")
+        "provider": local.get("LLM_PROVIDER")
+        or os.environ.get("LLM_PROVIDER")
+        or local.get("DEEPSEEK_PROVIDER")
+        or os.environ.get("DEEPSEEK_PROVIDER")
+        or DEFAULT_PROVIDER,
+        "api_key": local.get("LLM_API_KEY")
+        or os.environ.get("LLM_API_KEY", "")
+        or local.get("DEEPSEEK_API_KEY")
+        or os.environ.get("DEEPSEEK_API_KEY", ""),
+        "base_url": local.get("LLM_BASE_URL")
+        or os.environ.get("LLM_BASE_URL")
+        or local.get("DEEPSEEK_BASE_URL")
         or os.environ.get("DEEPSEEK_BASE_URL")
         or DEFAULT_BASE_URL,
-        "model": local.get("DEEPSEEK_MODEL") or os.environ.get("DEEPSEEK_MODEL") or DEFAULT_MODEL,
+        "model": local.get("LLM_MODEL")
+        or os.environ.get("LLM_MODEL")
+        or local.get("DEEPSEEK_MODEL")
+        or os.environ.get("DEEPSEEK_MODEL")
+        or DEFAULT_MODEL,
     }
 
 
-def save_config(api_key: str, base_url: str, model: str) -> None:
+def save_config(api_key: str, base_url: str, model: str, provider: str) -> None:
     existing = read_local_env()
-    existing["DEEPSEEK_API_KEY"] = api_key
-    existing["DEEPSEEK_BASE_URL"] = base_url or DEFAULT_BASE_URL
-    existing["DEEPSEEK_MODEL"] = model or DEFAULT_MODEL
+    existing["LLM_PROVIDER"] = provider or DEFAULT_PROVIDER
+    existing["LLM_API_KEY"] = api_key
+    existing["LLM_BASE_URL"] = base_url or DEFAULT_BASE_URL
+    existing["LLM_MODEL"] = model or DEFAULT_MODEL
     lines = [f"{key}={value}" for key, value in existing.items()]
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -98,15 +114,15 @@ def extract_json_object(text: str) -> dict[str, Any]:
 def normalize_base_url(base_url: str) -> str:
     parsed = urlparse(base_url)
     if parsed.scheme != "https" or not parsed.netloc:
-        raise ValueError("DeepSeek base URL must be an HTTPS URL")
+        raise ValueError("Model base URL must be an HTTPS URL")
     return base_url.rstrip("/")
 
 
-def request_deepseek_json(messages: list[dict[str, str]], temperature: float = 0.2) -> dict[str, Any]:
+def request_model_json(messages: list[dict[str, str]], temperature: float = 0.2) -> dict[str, Any]:
     config = get_config()
     api_key = config["api_key"].strip()
     if not api_key:
-        raise PermissionError("DeepSeek API key is not configured")
+        raise PermissionError("Model API key is not configured")
 
     base_url = normalize_base_url(config["base_url"])
     endpoint = f"{base_url}/chat/completions"
@@ -138,16 +154,16 @@ def request_deepseek_json(messages: list[dict[str, str]], temperature: float = 0
     parsed["_meta"] = {
         "model": result.get("model") or config["model"],
         "baseUrl": base_url,
-        "provider": "deepseek",
+        "provider": config["provider"],
     }
     return parsed
 
 
-def call_deepseek(payload: dict[str, Any]) -> dict[str, Any]:
-    return request_deepseek_json(build_messages(payload), temperature=0.2)
+def call_model_risk(payload: dict[str, Any]) -> dict[str, Any]:
+    return request_model_json(build_messages(payload), temperature=0.2)
 
 
-def call_deepseek_intel_refresh(payload: dict[str, Any], news_items: list[dict[str, str]]) -> dict[str, Any]:
+def call_model_intel_refresh(payload: dict[str, Any], news_items: list[dict[str, str]]) -> dict[str, Any]:
     match_name = str(payload.get("matchName") or "未指定比赛")
     pick_name = str(payload.get("pickName") or "未指定投注方向")
     search_query = str(payload.get("query") or "").strip()
@@ -177,12 +193,57 @@ def call_deepseek_intel_refresh(payload: dict[str, Any], news_items: list[dict[s
             "nextSteps": ["建议用户继续核实的事项，每条不超过30字"],
         },
     }
-    parsed = request_deepseek_json(
+    parsed = request_model_json(
         [
             {"role": "system", "content": system},
             {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
         ],
         temperature=0.15,
+    )
+    parsed["rawSources"] = news_items
+    return parsed
+
+
+def call_model_portfolio_refresh(payload: dict[str, Any], news_items: list[dict[str, str]]) -> dict[str, Any]:
+    open_bets = payload.get("openBets") or []
+    system = (
+        "你是一个投注组合赛前情报分析助手。你只能基于提供的新闻搜索结果归纳，"
+        "必须严格围绕用户已下注且未结算的球队、国家或比赛，不要输出无关球队、无关赛事或泛泛新闻。"
+        "关注伤停、阵容、政治/地缘事件、金融/赞助/足协财政、花边舆情、更衣室、纪律和市场异常。"
+        "不要预测具体比分，不要承诺盈利。必须输出严格 JSON。"
+    )
+    user = {
+        "任务": "从公开搜索结果中生成未结算投注组合的最新风险情报。",
+        "未结算下注记录": open_bets,
+        "新闻搜索结果": news_items,
+        "过滤要求": [
+            "只保留与未结算下注记录中的球队、国家、比赛双方明确相关的信息",
+            "删除无关球队、历史复盘、泛体育新闻和无法关联到当前下注记录的内容",
+            "政治、金融、花边新闻只有在会影响士气、出场、管理层、舆论压力或赛事环境时才保留",
+        ],
+        "输出格式": {
+            "intelText": "250到500字中文情报文本，按比赛或球队归纳，明确写出风险来源；无证据则写暂无明确公开信号",
+            "summary": "80字以内组合摘要",
+            "searchQuery": "最有效的查询词总结",
+            "sources": [
+                {
+                    "title": "来源标题",
+                    "url": "来源链接",
+                    "source": "媒体或搜索源",
+                    "publishedAt": "发布时间，未知则为空",
+                    "relevance": "0到100数字",
+                }
+            ],
+            "nextSteps": ["建议用户继续核实的事项，每条不超过30字"],
+            "coveredBets": ["被覆盖的未结算比赛或球队"],
+        },
+    }
+    parsed = request_model_json(
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+        ],
+        temperature=0.12,
     )
     parsed["rawSources"] = news_items
     return parsed
@@ -248,6 +309,8 @@ def refresh_news_items(payload: dict[str, Any]) -> list[dict[str, str]]:
     for query in queries:
         for feed_name, url in build_news_feed_urls(query):
             for item in fetch_rss_items(feed_name, url, query):
+                if not is_relevant_news_item(item, extract_terms_from_text(f"{match_name} {pick_name} {custom_query}")):
+                    continue
                 fingerprint = (item["title"].lower(), item["url"].split("?")[0])
                 key = "|".join(fingerprint)
                 if key in seen:
@@ -257,6 +320,100 @@ def refresh_news_items(payload: dict[str, Any]) -> list[dict[str, str]]:
                 if len(items) >= MAX_NEWS_ITEMS:
                     return items
     return items
+
+
+def refresh_portfolio_news_items(payload: dict[str, Any]) -> list[dict[str, str]]:
+    open_bets = [bet for bet in payload.get("openBets") or [] if isinstance(bet, dict)]
+    if not open_bets:
+        raise ValueError("openBets is required")
+
+    seen: set[str] = set()
+    items: list[dict[str, str]] = []
+    fallback_items: list[dict[str, str]] = []
+    for bet in open_bets[:10]:
+        terms = extract_terms_from_bet(bet)
+        if not terms:
+            continue
+        for query in build_portfolio_queries(bet, terms):
+            for feed_name, url in build_news_feed_urls(query):
+                for item in fetch_rss_items(feed_name, url, query):
+                    fingerprint = (item["title"].lower(), item["url"].split("?")[0])
+                    key = "|".join(fingerprint)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    item["matchedBet"] = str(bet.get("matchName") or "")
+                    item["terms"] = ", ".join(terms[:8])
+                    if not is_relevant_news_item(item, terms):
+                        fallback_items.append(item)
+                        continue
+                    items.append(item)
+                    if len(items) >= MAX_NEWS_ITEMS * 2:
+                        return items
+    return items or fallback_items[:MAX_NEWS_ITEMS]
+
+
+def extract_terms_from_bet(bet: dict[str, Any]) -> list[str]:
+    text = " ".join(
+        str(bet.get(key) or "")
+        for key in ("matchName", "pickName", "marketType", "correlationGroup")
+    )
+    return extract_terms_from_text(text)
+
+
+def extract_terms_from_text(text: str) -> list[str]:
+    cleaned = re.sub(
+        r"\b(vs|v|versus|win|draw|loss|winner|handicap|over|under)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"[胜负平让球主客不败单关串关玩法投注选择]+", " ", cleaned)
+    parts = re.split(r"\s+|/|,|，|、|\||-|—|:|：|vs\.?|VS|对|与", cleaned)
+    terms: list[str] = []
+    for part in parts:
+        term = part.strip("()（）[]【】「」'\" ")
+        if len(term) < 2:
+            continue
+        if term.lower() in {"team", "match", "market", "home", "away"}:
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms[:12]
+
+
+def build_portfolio_queries(bet: dict[str, Any], terms: list[str]) -> list[str]:
+    primary_terms = terms[:4]
+    target = " ".join(primary_terms)
+    match_name = str(bet.get("matchName") or "").strip()
+    queries = [
+        f"{target} injury suspension lineup team news",
+        f"{target} politics government federation visa travel football",
+        f"{target} finance sponsor federation salary bonus football",
+        f"{target} scandal gossip locker room discipline football",
+        f"{match_name or target} 伤病 停赛 阵容",
+        f"{match_name or target} 政治 足协 签证 旅行",
+        f"{match_name or target} 财政 赞助 奖金 工资",
+        f"{match_name or target} 花边 更衣室 纪律 舆论",
+    ]
+    for term in primary_terms:
+        queries.extend(
+            [
+                f"{term} football team news injury",
+                f"{term} football politics finance scandal",
+                f"{term} 足球 伤病 阵容",
+                f"{term} 足球 政治 金融 花边",
+            ]
+        )
+    return queries
+
+
+def is_relevant_news_item(item: dict[str, str], terms: list[str]) -> bool:
+    if not terms:
+        return True
+    haystack = " ".join([item.get("title", ""), item.get("snippet", ""), item.get("source", "")]).lower()
+    normalized_terms = [term.lower() for term in terms if len(term) >= 2]
+    return any(term in haystack for term in normalized_terms)
 
 
 def build_news_feed_urls(query: str) -> list[tuple[str, str]]:
@@ -332,11 +489,12 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/api/deepseek/status":
+        if parsed.path in {"/api/llm/status", "/api/deepseek/status"}:
             config = get_config()
             self.send_json(
                 {
                     "configured": bool(config["api_key"]),
+                    "provider": config["provider"],
                     "baseUrl": config["base_url"],
                     "model": config["model"],
                 }
@@ -347,24 +505,25 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
-            if parsed.path == "/api/config/deepseek":
+            if parsed.path in {"/api/config/llm", "/api/config/deepseek"}:
                 data = parse_json_body(self)
                 api_key = str(data.get("apiKey") or "").strip()
                 base_url = normalize_base_url(str(data.get("baseUrl") or DEFAULT_BASE_URL))
                 model = str(data.get("model") or DEFAULT_MODEL).strip()
-                if not api_key.startswith("sk-"):
-                    self.send_json({"error": "API key format is invalid"}, HTTPStatus.BAD_REQUEST)
+                provider = str(data.get("provider") or DEFAULT_PROVIDER).strip()
+                if len(api_key) < 8:
+                    self.send_json({"error": "API key is too short"}, HTTPStatus.BAD_REQUEST)
                     return
-                save_config(api_key, base_url, model)
-                self.send_json({"configured": True, "baseUrl": base_url, "model": model})
+                save_config(api_key, base_url, model, provider)
+                self.send_json({"configured": True, "provider": provider, "baseUrl": base_url, "model": model})
                 return
 
-            if parsed.path == "/api/deepseek/risk":
+            if parsed.path in {"/api/llm/risk", "/api/deepseek/risk"}:
                 data = parse_json_body(self)
                 if not str(data.get("text") or "").strip():
                     self.send_json({"error": "text is required"}, HTTPStatus.BAD_REQUEST)
                     return
-                self.send_json(call_deepseek(data))
+                self.send_json(call_model_risk(data))
                 return
 
             if parsed.path == "/api/intel/refresh":
@@ -379,7 +538,22 @@ class AppHandler(SimpleHTTPRequestHandler):
                         HTTPStatus.NOT_FOUND,
                     )
                     return
-                self.send_json(call_deepseek_intel_refresh(data, news_items))
+                self.send_json(call_model_intel_refresh(data, news_items))
+                return
+
+            if parsed.path == "/api/intel/portfolio-refresh":
+                data = parse_json_body(self)
+                news_items = refresh_portfolio_news_items(data)
+                if not news_items:
+                    self.send_json(
+                        {
+                            "error": "No relevant recent news found for open bets",
+                            "hint": "Check team/country names in open betting records or add Chinese and English aliases.",
+                        },
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self.send_json(call_model_portfolio_refresh(data, news_items))
                 return
 
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
@@ -388,7 +562,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")[:500]
             self.send_json(
-                {"error": "DeepSeek API request failed", "status": error.code, "detail": body},
+                {"error": "Model API request failed", "status": error.code, "detail": body},
                 HTTPStatus.BAD_GATEWAY,
             )
         except Exception as error:  # noqa: BLE001 - return a safe local API error.
@@ -407,7 +581,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run BetDogEye with a local DeepSeek proxy.")
+    parser = argparse.ArgumentParser(description="Run BetDogEye with a local OpenAI-compatible model proxy.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4173)
     args = parser.parse_args()

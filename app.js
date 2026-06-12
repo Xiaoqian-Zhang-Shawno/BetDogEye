@@ -114,11 +114,13 @@ const els = {
   sourceReliability: document.querySelector("#sourceReliability"),
   clearIntelBtn: document.querySelector("#clearIntelBtn"),
   aiStatus: document.querySelector("#aiStatus"),
+  llmProvider: document.querySelector("#llmProvider"),
   deepseekKey: document.querySelector("#deepseekKey"),
   deepseekModel: document.querySelector("#deepseekModel"),
   deepseekBaseUrl: document.querySelector("#deepseekBaseUrl"),
   saveDeepseekKeyBtn: document.querySelector("#saveDeepseekKeyBtn"),
   refreshIntelBtn: document.querySelector("#refreshIntelBtn"),
+  refreshOpenBetsBtn: document.querySelector("#refreshOpenBetsBtn"),
   deepseekAnalyzeBtn: document.querySelector("#deepseekAnalyzeBtn"),
   aiConfigMessage: document.querySelector("#aiConfigMessage"),
   riskRadar: document.querySelector("#riskRadar"),
@@ -216,7 +218,9 @@ function bindEvents() {
   });
 
   els.saveDeepseekKeyBtn.addEventListener("click", saveDeepseekConfig);
+  els.llmProvider.addEventListener("change", applyProviderPreset);
   els.refreshIntelBtn.addEventListener("click", runWebIntelRefresh);
+  els.refreshOpenBetsBtn.addEventListener("click", runOpenBetsIntelRefresh);
   els.deepseekAnalyzeBtn.addEventListener("click", runDeepseekAnalysis);
 
   els.settingsForm.addEventListener("submit", (event) => {
@@ -945,7 +949,7 @@ function renderFactorList(factors) {
 function renderAiInsightList() {
   const insights = (state.aiInsights || []).slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (!insights.length) {
-    els.aiInsightList.innerHTML = empty("DeepSeek 分析结果会在这里显示");
+    els.aiInsightList.innerHTML = empty("模型分析结果会在这里显示");
     return;
   }
   els.aiInsightList.innerHTML = insights
@@ -961,7 +965,7 @@ function renderAiInsightList() {
         <article class="factor-card">
           <header>
             <div>
-              <strong>DeepSeek：${escapeHtml(matchName)}</strong>
+              <strong>模型分析：${escapeHtml(matchName)}</strong>
               <p>${escapeHtml(insight.summary || "已完成 AI 风险分析")}</p>
             </div>
             <span class="risk-tag ${riskClass}">${NUMBER.format(insight.upsetRiskScore)}</span>
@@ -1242,9 +1246,10 @@ function saveIntelFromForm() {
 
 async function refreshDeepseekStatus() {
   try {
-    const response = await fetch("/api/deepseek/status", { cache: "no-store" });
+    const response = await fetch("/api/llm/status", { cache: "no-store" });
     if (!response.ok) throw new Error("status unavailable");
     const data = await response.json();
+    els.llmProvider.value = data.provider || "DeepSeek";
     els.deepseekBaseUrl.value = data.baseUrl || "https://api.deepseek.com";
     els.deepseekModel.value = data.model || "deepseek-chat";
     els.aiStatus.textContent = data.configured ? "已配置" : "未配置";
@@ -1257,18 +1262,35 @@ async function refreshDeepseekStatus() {
   }
 }
 
+function applyProviderPreset() {
+  const provider = els.llmProvider.value;
+  if (provider === "DeepSeek") {
+    els.deepseekBaseUrl.value = "https://api.deepseek.com";
+    if (!els.deepseekModel.value || els.deepseekModel.value.startsWith("gpt-")) {
+      els.deepseekModel.value = "deepseek-chat";
+    }
+  }
+  if (provider === "OpenAI") {
+    els.deepseekBaseUrl.value = "https://api.openai.com/v1";
+    if (!els.deepseekModel.value || els.deepseekModel.value.startsWith("deepseek")) {
+      els.deepseekModel.value = "gpt-4.1-mini";
+    }
+  }
+}
+
 async function saveDeepseekConfig() {
   const apiKey = els.deepseekKey.value.trim();
   if (!apiKey) {
-    setAiMessage("请输入 DeepSeek API Key。", "warn");
+    setAiMessage("请输入模型 API Key。", "warn");
     return false;
   }
   try {
     setAiMessage("正在保存到本机...", "info");
-    const response = await fetch("/api/config/deepseek", {
+    const response = await fetch("/api/config/llm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        provider: els.llmProvider.value,
         apiKey,
         baseUrl: els.deepseekBaseUrl.value.trim() || "https://api.deepseek.com",
         model: els.deepseekModel.value.trim() || "deepseek-chat",
@@ -1279,7 +1301,7 @@ async function saveDeepseekConfig() {
     els.deepseekKey.value = "";
     els.aiStatus.textContent = "已配置";
     els.aiStatus.className = "mini-badge status-tag won";
-    setAiMessage(`已保存，模型 ${data.model}`, "good");
+    setAiMessage(`已保存，${data.provider || "模型"} / ${data.model}`, "good");
     return true;
   } catch (error) {
     setAiMessage(`保存失败：${error.message}`, "bad");
@@ -1302,9 +1324,9 @@ async function runDeepseekAnalysis() {
   const localFactors = mineFactors(text, Number(els.sourceReliability.value));
   els.deepseekAnalyzeBtn.disabled = true;
   els.deepseekAnalyzeBtn.textContent = "分析中...";
-  setAiMessage("DeepSeek 正在分析风险因子。", "info");
+  setAiMessage("模型正在分析风险因子。", "info");
   try {
-    const response = await fetch("/api/deepseek/risk", {
+    const response = await fetch("/api/llm/risk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1317,7 +1339,7 @@ async function runDeepseekAnalysis() {
       }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "DeepSeek 请求失败");
+    if (!response.ok) throw new Error(data.error || "模型请求失败");
     const insight = normalizeAiInsight({
       id: makeId(),
       matchId: selected.matchId,
@@ -1341,7 +1363,7 @@ async function runDeepseekAnalysis() {
     }
   } finally {
     els.deepseekAnalyzeBtn.disabled = false;
-    els.deepseekAnalyzeBtn.textContent = "DeepSeek 分析";
+    els.deepseekAnalyzeBtn.textContent = "模型分析";
   }
 }
 
@@ -1387,6 +1409,70 @@ async function runWebIntelRefresh() {
     els.refreshIntelBtn.disabled = false;
     els.refreshIntelBtn.textContent = "刷新网络情报";
   }
+}
+
+async function runOpenBetsIntelRefresh() {
+  if (els.deepseekKey.value.trim()) {
+    const saved = await saveDeepseekConfig();
+    if (!saved) return;
+  }
+  const openBets = buildOpenBetsSearchPayload();
+  if (!openBets.length) {
+    setAiMessage("当前没有未结算下注记录。", "warn");
+    return;
+  }
+  els.refreshOpenBetsBtn.disabled = true;
+  els.refreshOpenBetsBtn.textContent = "组合刷新中...";
+  setAiMessage(`正在搜索 ${openBets.length} 条未结算下注的相关球队/国家信息。`, "info");
+  try {
+    const response = await fetch("/api/intel/portfolio-refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        openBets,
+        query: els.intelText.value.trim().slice(0, 120),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "组合刷新失败");
+    const record = normalizeWebIntel({
+      id: makeId(),
+      matchId: "portfolio",
+      createdAt: new Date().toISOString(),
+      summary: data.summary,
+      searchQuery: data.searchQuery,
+      intelText: data.intelText,
+      sources: data.sources || data.rawSources || [],
+      nextSteps: data.nextSteps,
+    });
+    state.webIntel.unshift(record);
+    els.intelMatch.value = "portfolio";
+    els.intelText.value = record.intelText;
+    persistAndRender();
+    setAiMessage(`已刷新未结算组合，引用 ${record.sources.length} 个相关来源。`, "good");
+  } catch (error) {
+    setAiMessage(`未结算组合刷新失败：${error.message}`, "bad");
+  } finally {
+    els.refreshOpenBetsBtn.disabled = false;
+    els.refreshOpenBetsBtn.textContent = "刷新未结算组合";
+  }
+}
+
+function buildOpenBetsSearchPayload() {
+  return state.bets
+    .filter((bet) => bet.status === "open")
+    .map((bet) => ({
+      id: bet.id,
+      matchName: bet.matchName,
+      pickName: bet.pickName,
+      marketType: bet.marketType,
+      matchDate: bet.matchDate,
+      stake: bet.actualOutflow,
+      maxPayout: bet.maxPayout,
+      subjectiveProb: bet.subjectiveProb,
+      correlationGroup: bet.correlationGroup,
+      notes: bet.notes,
+    }));
 }
 
 function setAiMessage(message, tone = "info") {

@@ -1,4 +1,4 @@
-const CACHE_NAME = "betdogeye-v5";
+const CACHE_NAME = "betdogeye-v6";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
