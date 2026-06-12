@@ -23,6 +23,13 @@ const profileScale = {
   aggressive: { label: "进取", kelly: 0.38, riskPenalty: 0.82 },
 };
 
+const betTypeMeta = {
+  single: { label: "单关" },
+  parlay: { label: "混合过关" },
+};
+
+const parlayMarketTypes = ["胜平负", "让球胜平负", "总进球", "半全场", "比分", "二选一", "其他输赢盘"];
+
 const factorRules = [
   {
     key: "injury",
@@ -101,6 +108,13 @@ const els = {
   ledgerStatusFilter: document.querySelector("#ledgerStatusFilter"),
   betForm: document.querySelector("#betForm"),
   betFormTitle: document.querySelector("#betFormTitle"),
+  parlayPanel: document.querySelector("#parlayPanel"),
+  parlayLegList: document.querySelector("#parlayLegList"),
+  addParlayLegBtn: document.querySelector("#addParlayLegBtn"),
+  parlayLegCount: document.querySelector("#parlayLegCount"),
+  parlayOddsValue: document.querySelector("#parlayOddsValue"),
+  parlayProbValue: document.querySelector("#parlayProbValue"),
+  parlayPayoutValue: document.querySelector("#parlayPayoutValue"),
   deleteBetBtn: document.querySelector("#deleteBetBtn"),
   resetBetFormBtn: document.querySelector("#resetBetFormBtn"),
   newBetBtn: document.querySelector("#newBetBtn"),
@@ -138,6 +152,7 @@ const els = {
 
 const formFields = [
   "betId",
+  "betType",
   "matchName",
   "matchDate",
   "pickName",
@@ -197,6 +212,24 @@ function bindEvents() {
 
   els.ledgerSearch.addEventListener("input", renderLedger);
   els.ledgerStatusFilter.addEventListener("change", renderLedger);
+  document.querySelector("#betType").addEventListener("change", handleBetTypeChange);
+  document.querySelector("#maxPayout").addEventListener("input", updateParlayComputed);
+  document.querySelector("#actualOutflow").addEventListener("input", updateParlayComputed);
+  els.addParlayLegBtn.addEventListener("click", () => {
+    addParlayLegRow();
+    updateParlayComputed();
+  });
+  els.parlayLegList.addEventListener("input", updateParlayComputed);
+  els.parlayLegList.addEventListener("change", updateParlayComputed);
+  els.parlayLegList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-remove-leg]");
+    if (!button) return;
+    const rows = [...els.parlayLegList.querySelectorAll(".parlay-leg")];
+    if (rows.length <= 2) return;
+    rows[Number(button.dataset.removeLeg)]?.remove();
+    renumberParlayLegs();
+    updateParlayComputed();
+  });
 
   els.intelForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -241,6 +274,7 @@ function bindEvents() {
   els.importJsonInput.addEventListener("change", importJson);
 
   document.querySelector("#stake").addEventListener("input", mirrorOutflowWhenEmpty);
+  document.querySelector("#stake").addEventListener("input", updateParlayComputed);
 }
 
 function setView(view) {
@@ -385,22 +419,79 @@ function createDemoState() {
 }
 
 function normalizeBet(bet) {
+  const rawLegs = Array.isArray(bet.parlayLegs) ? bet.parlayLegs.map(normalizeParlayLeg).filter(isUsableParlayLeg) : [];
+  const betType = bet.betType === "parlay" || rawLegs.length >= 2 || bet.marketType === "混合过关" ? "parlay" : "single";
+  const stake = finite(bet.stake, 0);
+  const actualOutflow = finite(bet.actualOutflow, stake);
+  const parlayOdds = calculateParlayOdds(rawLegs);
+  const parlayProb = calculateParlayJointProb(rawLegs);
+  const baseMatchName = String(bet.matchName || "").trim();
+  const basePickName = String(bet.pickName || "").trim();
   return {
     id: bet.id || makeId(),
-    matchName: String(bet.matchName || "").trim() || "未命名比赛",
+    betType,
+    matchName: baseMatchName || (betType === "parlay" ? buildParlayName(rawLegs) : "未命名比赛"),
     matchDate: bet.matchDate || new Date().toISOString().slice(0, 10),
-    pickName: String(bet.pickName || "").trim() || "未填写",
-    marketType: bet.marketType || "胜平负",
-    stake: finite(bet.stake, 0),
-    maxPayout: finite(bet.maxPayout, 0),
-    actualOutflow: finite(bet.actualOutflow, finite(bet.stake, 0)),
+    pickName: basePickName || (betType === "parlay" ? buildParlayPickName(rawLegs) : "未填写"),
+    marketType: betType === "parlay" ? "混合过关" : bet.marketType || "胜平负",
+    parlayLegs: betType === "parlay" ? rawLegs : [],
+    stake,
+    maxPayout:
+      betType === "parlay" && parlayOdds > 1 && actualOutflow > 0
+        ? Math.round(actualOutflow * parlayOdds)
+        : finite(bet.maxPayout, 0),
+    actualOutflow,
     actualIncome: finite(bet.actualIncome, 0),
-    subjectiveProb: clamp(finite(bet.subjectiveProb, 50), 1, 99),
+    subjectiveProb: betType === "parlay" && parlayProb > 0 ? round1(parlayProb) : clamp(finite(bet.subjectiveProb, 50), 0.1, 99),
     status: statusMeta[bet.status] ? bet.status : "open",
-    correlationGroup: String(bet.correlationGroup || "").trim(),
+    correlationGroup: String(bet.correlationGroup || "").trim() || (betType === "parlay" ? "混合过关" : ""),
     confidence: bet.confidence || "medium",
     notes: String(bet.notes || ""),
   };
+}
+
+function normalizeParlayLeg(leg) {
+  return {
+    id: leg.id || makeId(),
+    matchName: String(leg.matchName || "").trim(),
+    matchDate: leg.matchDate || "",
+    marketType: parlayMarketTypes.includes(leg.marketType) ? leg.marketType : "胜平负",
+    pickName: String(leg.pickName || "").trim(),
+    odds: Math.max(finite(leg.odds, 1), 1),
+    subjectiveProb: clamp(finite(leg.subjectiveProb, 50), 0.1, 99),
+  };
+}
+
+function isUsableParlayLeg(leg) {
+  return Boolean(leg.matchName || leg.pickName || leg.odds > 1);
+}
+
+function calculateParlayOdds(legs) {
+  const usable = legs.filter((leg) => leg.odds > 1);
+  if (!usable.length || usable.length !== legs.length) return 0;
+  return usable.reduce((acc, leg) => acc * leg.odds, 1);
+}
+
+function calculateParlayJointProb(legs) {
+  const usable = legs.filter((leg) => leg.subjectiveProb > 0);
+  if (!usable.length || usable.length !== legs.length) return 0;
+  return usable.reduce((acc, leg) => acc * (leg.subjectiveProb / 100), 1) * 100;
+}
+
+function buildParlayName(legs) {
+  const count = Math.max(legs.length, 2);
+  const firstNames = legs
+    .map((leg) => leg.matchName)
+    .filter(Boolean)
+    .slice(0, 2);
+  return firstNames.length ? `${firstNames.join(" / ")} 等 ${count}串1` : `混合过关 ${count}串1`;
+}
+
+function buildParlayPickName(legs) {
+  const picks = legs
+    .map((leg) => [leg.matchName, leg.pickName].filter(Boolean).join(" "))
+    .filter(Boolean);
+  return picks.length ? `${legs.length}串1：${picks.join(" × ")}` : `${Math.max(legs.length, 2)}串1`;
 }
 
 function normalizeIntel(item) {
@@ -529,7 +620,10 @@ function enrichBet(bet, riskScore) {
   const odds = outflow > 0 ? bet.maxPayout / outflow : 0;
   const impliedProb = odds > 0 ? (1 / odds) * 100 : 0;
   const profile = profileScale[state.riskProfile] || profileScale.balanced;
-  const adjustedProb = clamp(bet.subjectiveProb * (1 - riskScore * 0.34 * profile.riskPenalty), 1, 99);
+  const baseProb = getBetBaseProbability(bet);
+  const parlayRisk = getParlayStructuralRisk(bet);
+  const totalRiskScore = clamp(riskScore + parlayRisk, 0, 1);
+  const adjustedProb = clamp(baseProb * (1 - totalRiskScore * 0.34 * profile.riskPenalty), 0.1, 99);
   const expectedProfit = (adjustedProb / 100) * bet.maxPayout - outflow;
   const potentialProfit = bet.maxPayout - outflow;
   const realizedProfit = bet.actualIncome - outflow;
@@ -543,8 +637,11 @@ function enrichBet(bet, riskScore) {
     ...bet,
     odds,
     impliedProb,
+    baseProb,
     adjustedProb,
-    riskScore,
+    riskScore: totalRiskScore,
+    intelligenceRiskScore: riskScore,
+    parlayRisk,
     expectedProfit,
     potentialProfit,
     realizedProfit,
@@ -552,6 +649,23 @@ function enrichBet(bet, riskScore) {
     suggestedStake,
     roiExpected,
   };
+}
+
+function getBetBaseProbability(bet) {
+  if (bet.betType === "parlay" && bet.parlayLegs.length >= 2) {
+    const joint = calculateParlayJointProb(bet.parlayLegs);
+    if (joint > 0) return joint;
+  }
+  return clamp(finite(bet.subjectiveProb, 50), 0.1, 99);
+}
+
+function getParlayStructuralRisk(bet) {
+  if (bet.betType !== "parlay") return 0;
+  const legCount = Math.max(bet.parlayLegs.length, 2);
+  const odds = calculateParlayOdds(bet.parlayLegs);
+  const legPenalty = Math.max(0, legCount - 1) * 0.075;
+  const oddsPenalty = odds > 8 ? Math.min(0.16, Math.log(odds / 8) * 0.05) : 0;
+  return clamp(legPenalty + oddsPenalty, 0.1, 0.42);
 }
 
 function getRiskByMatch() {
@@ -819,7 +933,7 @@ function renderLedger() {
   const query = els.ledgerSearch.value.trim().toLowerCase();
   const status = els.ledgerStatusFilter.value;
   const rows = analytics.bets.filter((bet) => {
-    const matchesQuery = [bet.matchName, bet.pickName, bet.marketType, bet.correlationGroup]
+    const matchesQuery = [bet.matchName, bet.pickName, bet.marketType, bet.correlationGroup, getParlaySearchText(bet)]
       .join(" ")
       .toLowerCase()
       .includes(query);
@@ -836,15 +950,19 @@ function renderLedger() {
     .map((bet) => {
       const riskClass = bet.riskScore > 0.55 ? "high" : bet.riskScore > 0.28 ? "mid" : "low";
       const status = statusMeta[bet.status];
+      const typeLabel = betTypeMeta[bet.betType]?.label || "单关";
+      const passLabel = bet.betType === "parlay" ? ` · ${bet.parlayLegs.length}串1` : "";
+      const probLabel = bet.betType === "parlay" ? "联合" : "主观";
       return `
         <tr>
           <td>
             <strong>${escapeHtml(bet.matchName)}</strong>
-            <small>${bet.matchDate} · ${escapeHtml(bet.marketType)}</small>
+            <small>${bet.matchDate} · ${escapeHtml(typeLabel)}${passLabel} · ${escapeHtml(bet.marketType)}</small>
+            ${bet.betType === "parlay" ? `<div class="parlay-mini">${renderParlayMini(bet.parlayLegs)}</div>` : ""}
           </td>
           <td>
             <strong>${escapeHtml(bet.pickName)}</strong>
-            <small>主观 ${NUMBER.format(bet.subjectiveProb)}% / 调整 ${NUMBER.format(bet.adjustedProb)}%</small>
+            <small>${probLabel} ${NUMBER.format(bet.baseProb || bet.subjectiveProb)}% / 调整 ${NUMBER.format(bet.adjustedProb)}%</small>
           </td>
           <td>${money(bet.actualOutflow)}<br><small>赔率 ${NUMBER.format(bet.odds || 0)}</small></td>
           <td>${money(bet.maxPayout)}<br><small>潜利 ${money(bet.potentialProfit)}</small></td>
@@ -871,10 +989,41 @@ function renderIntelSelect() {
   els.intelMatch.innerHTML = `
     <option value="portfolio">全部组合</option>
     ${state.bets
-      .map((bet) => `<option value="${bet.id}">${escapeHtml(bet.matchName)} · ${escapeHtml(bet.pickName)}</option>`)
+      .map((bet) => `<option value="${bet.id}">${escapeHtml(formatBetOptionLabel(bet))}</option>`)
       .join("")}
   `;
   els.intelMatch.value = state.bets.some((bet) => bet.id === selected) ? selected : "portfolio";
+}
+
+function formatBetOptionLabel(bet) {
+  const typeLabel = bet.betType === "parlay" ? `${bet.parlayLegs.length}串1` : bet.marketType;
+  return `${bet.matchName} · ${typeLabel} · ${bet.pickName}`;
+}
+
+function renderParlayMini(legs) {
+  return legs
+    .slice(0, 4)
+    .map((leg, index) => `<span>${index + 1}. ${escapeHtml(leg.matchName)} ${escapeHtml(leg.pickName)}</span>`)
+    .join("");
+}
+
+function getParlaySearchText(bet) {
+  if (bet.betType !== "parlay") return "";
+  return bet.parlayLegs
+    .map((leg) => [leg.matchName, leg.pickName, leg.marketType].filter(Boolean).join(" "))
+    .join(" ");
+}
+
+function getParlayCsvText(bet) {
+  if (bet.betType !== "parlay") return "";
+  return bet.parlayLegs
+    .map(
+      (leg, index) =>
+        `${index + 1}.${leg.matchName}/${leg.marketType}/${leg.pickName}/赔率${NUMBER.format(leg.odds)}/胜率${NUMBER.format(
+          leg.subjectiveProb
+        )}%`
+    )
+    .join(" | ");
 }
 
 function renderRiskBoard() {
@@ -1096,11 +1245,21 @@ function buildRecommendations(analytics) {
     if (bet.actualOutflow > cap) {
       recs.push({
         level: "warn",
-        title: `单场仓位过重：${bet.matchName}`,
+        title: `${bet.betType === "parlay" ? "过关" : "单场"}仓位过重：${bet.matchName}`,
         badge: money(bet.actualOutflow),
-        body: `单场支出超过上限 ${money(cap)}。若不想完全退出，可用对冲参考赔率 ${NUMBER.format(
+        body: `${bet.betType === "parlay" ? "过关单" : "单场"}支出超过上限 ${money(cap)}。若不想完全退出，可用对冲参考赔率 ${NUMBER.format(
           state.hedgeOdds
         )} 估算保护仓位。`,
+      });
+    }
+    if (bet.betType === "parlay" && bet.parlayLegs.length >= 2) {
+      recs.push({
+        level: bet.parlayLegs.length >= 4 || bet.riskScore > 0.4 ? "warn" : "info",
+        title: `混合过关全中风险：${bet.matchName}`,
+        badge: `${bet.parlayLegs.length}串1`,
+        body: `该记录需要 ${bet.parlayLegs.length} 场全部命中才有奖金，联合胜率约 ${NUMBER.format(
+          bet.baseProb
+        )}%。建议把过关单支出控制在单关上限以下，并重点复核每一关的伤停和临场阵容。`,
       });
     }
     if (bet.expectedProfit < 0) {
@@ -1189,6 +1348,14 @@ function renderDiscipline(analytics) {
 
 function saveBetFromForm() {
   const form = getBetFormValue();
+  if (form.betType === "parlay" && form.parlayLegs.length < 2) {
+    alert("混合过关至少需要 2 场明细。");
+    return;
+  }
+  if (form.betType === "parlay" && hasDuplicateParlayMatches(form.parlayLegs)) {
+    alert("混合过关应选择不同比赛场次。请检查是否把同一场的不同玩法放进了同一张过关单。");
+    return;
+  }
   const existingIndex = state.bets.findIndex((bet) => bet.id === form.id);
   if (existingIndex >= 0) {
     state.bets[existingIndex] = form;
@@ -1200,17 +1367,26 @@ function saveBetFromForm() {
 }
 
 function getBetFormValue() {
+  const betType = document.querySelector("#betType").value === "parlay" ? "parlay" : "single";
+  const parlayLegs = betType === "parlay" ? readParlayLegsFromForm().filter(isCompleteParlayLeg) : [];
+  const parlayOdds = calculateParlayOdds(parlayLegs);
+  const parlayProb = calculateParlayJointProb(parlayLegs);
+  const actualOutflow = Number(document.querySelector("#actualOutflow").value || document.querySelector("#stake").value);
+  const maxPayout = betType === "parlay" && parlayOdds > 1 ? Math.round(actualOutflow * parlayOdds) : Number(document.querySelector("#maxPayout").value);
+  const subjectiveProb = betType === "parlay" && parlayProb > 0 ? round1(parlayProb) : Number(document.querySelector("#subjectiveProb").value);
   return normalizeBet({
     id: document.querySelector("#betId").value || makeId(),
-    matchName: document.querySelector("#matchName").value,
+    betType,
+    matchName: document.querySelector("#matchName").value || (betType === "parlay" ? buildParlayName(parlayLegs) : ""),
     matchDate: document.querySelector("#matchDate").value,
-    pickName: document.querySelector("#pickName").value,
-    marketType: document.querySelector("#marketType").value,
+    pickName: betType === "parlay" ? buildParlayPickName(parlayLegs) : document.querySelector("#pickName").value,
+    marketType: betType === "parlay" ? "混合过关" : document.querySelector("#marketType").value,
+    parlayLegs,
     stake: Number(document.querySelector("#stake").value),
-    maxPayout: Number(document.querySelector("#maxPayout").value),
-    actualOutflow: Number(document.querySelector("#actualOutflow").value),
+    maxPayout,
+    actualOutflow,
     actualIncome: Number(document.querySelector("#actualIncome").value),
-    subjectiveProb: Number(document.querySelector("#subjectiveProb").value),
+    subjectiveProb,
     status: document.querySelector("#betStatus").value,
     correlationGroup: document.querySelector("#correlationGroup").value,
     confidence: document.querySelector("#confidence").value,
@@ -1222,6 +1398,7 @@ function editBet(id) {
   const bet = state.bets.find((item) => item.id === id);
   if (!bet) return;
   document.querySelector("#betId").value = bet.id;
+  document.querySelector("#betType").value = bet.betType || "single";
   document.querySelector("#matchName").value = bet.matchName;
   document.querySelector("#matchDate").value = bet.matchDate;
   document.querySelector("#pickName").value = bet.pickName;
@@ -1235,6 +1412,8 @@ function editBet(id) {
   document.querySelector("#correlationGroup").value = bet.correlationGroup;
   document.querySelector("#confidence").value = bet.confidence;
   document.querySelector("#betNotes").value = bet.notes;
+  renderParlayLegRows(bet.parlayLegs?.length ? bet.parlayLegs : createEmptyParlayLegs());
+  updateBetTypeUi();
   els.betFormTitle.textContent = "编辑下注";
   els.deleteBetBtn.classList.remove("hidden");
   setView("ledger");
@@ -1246,11 +1425,14 @@ function resetBetForm() {
     if (!node) return;
     node.value = "";
   });
+  document.querySelector("#betType").value = "single";
   document.querySelector("#matchDate").value = new Date().toISOString().slice(0, 10);
   document.querySelector("#marketType").value = "胜平负";
   document.querySelector("#subjectiveProb").value = "55";
   document.querySelector("#betStatus").value = "open";
   document.querySelector("#confidence").value = "medium";
+  renderParlayLegRows(createEmptyParlayLegs());
+  updateBetTypeUi();
   els.betFormTitle.textContent = "新增下注";
   els.deleteBetBtn.classList.add("hidden");
 }
@@ -1259,6 +1441,165 @@ function mirrorOutflowWhenEmpty() {
   const outflow = document.querySelector("#actualOutflow");
   if (!outflow.value) {
     outflow.value = document.querySelector("#stake").value;
+  }
+}
+
+function handleBetTypeChange() {
+  updateBetTypeUi();
+  updateParlayComputed();
+}
+
+function updateBetTypeUi() {
+  const isParlay = document.querySelector("#betType").value === "parlay";
+  els.parlayPanel.classList.toggle("hidden", !isParlay);
+  document.querySelector("#matchName").required = !isParlay;
+  document.querySelector("#pickName").required = !isParlay;
+  document.querySelector("#maxPayout").readOnly = isParlay;
+  document.querySelector("#subjectiveProb").readOnly = isParlay;
+  if (isParlay) {
+    if (!els.parlayLegList.querySelector(".parlay-leg")) {
+      renderParlayLegRows(createEmptyParlayLegs());
+    }
+    document.querySelector("#marketType").value = "混合过关";
+    document.querySelector("#pickName").placeholder = "自动生成：3串1：A胜 × B胜 × C胜";
+  } else {
+    document.querySelector("#maxPayout").readOnly = false;
+    document.querySelector("#subjectiveProb").readOnly = false;
+    document.querySelector("#pickName").placeholder = "主胜 / 客胜 / 平局";
+    if (document.querySelector("#marketType").value === "混合过关") {
+      document.querySelector("#marketType").value = "胜平负";
+    }
+  }
+}
+
+function createEmptyParlayLegs() {
+  const today = new Date().toISOString().slice(0, 10);
+  return [0, 1].map(() => ({
+    id: makeId(),
+    matchName: "",
+    matchDate: today,
+    marketType: "胜平负",
+    pickName: "",
+    odds: 1,
+    subjectiveProb: 50,
+  }));
+}
+
+function renderParlayLegRows(legs) {
+  els.parlayLegList.innerHTML = legs.map(renderParlayLegRow).join("");
+  renumberParlayLegs();
+  updateParlayComputed();
+}
+
+function renderParlayLegRow(leg, index) {
+  const options = parlayMarketTypes
+    .map((type) => `<option value="${escapeHtml(type)}" ${type === leg.marketType ? "selected" : ""}>${escapeHtml(type)}</option>`)
+    .join("");
+  return `
+    <div class="parlay-leg" data-leg-index="${index}" data-leg-id="${escapeHtml(leg.id || makeId())}">
+      <div class="parlay-leg-title">
+        <span class="scatter-index">${index + 1}</span>
+        <strong>第 ${index + 1} 关</strong>
+        <button class="icon-button" type="button" title="删除这一关" data-remove-leg="${index}">×</button>
+      </div>
+      <div class="parlay-leg-grid">
+        <label>
+          比赛
+          <input data-leg-field="matchName" value="${escapeHtml(leg.matchName)}" placeholder="A队 vs B队" />
+        </label>
+        <label>
+          日期
+          <input data-leg-field="matchDate" type="date" value="${escapeHtml(leg.matchDate || new Date().toISOString().slice(0, 10))}" />
+        </label>
+        <label>
+          玩法
+          <select data-leg-field="marketType">${options}</select>
+        </label>
+        <label>
+          投注选择
+          <input data-leg-field="pickName" value="${escapeHtml(leg.pickName)}" placeholder="主胜 / 客胜 / 平" />
+        </label>
+        <label>
+          单关赔率
+          <input data-leg-field="odds" type="number" min="1" step="0.01" value="${escapeHtml(inputNumber(leg.odds || 1))}" />
+        </label>
+        <label>
+          单关胜率 %
+          <input data-leg-field="subjectiveProb" type="number" min="0.1" max="99" step="0.1" value="${escapeHtml(inputNumber(leg.subjectiveProb || 50))}" />
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+function addParlayLegRow() {
+  const rows = readParlayLegsFromForm();
+  rows.push(createEmptyParlayLegs()[0]);
+  renderParlayLegRows(rows);
+}
+
+function renumberParlayLegs() {
+  [...els.parlayLegList.querySelectorAll(".parlay-leg")].forEach((row, index) => {
+    row.dataset.legIndex = String(index);
+    row.querySelector(".scatter-index").textContent = String(index + 1);
+    row.querySelector(".parlay-leg-title strong").textContent = `第 ${index + 1} 关`;
+    row.querySelector("[data-remove-leg]").dataset.removeLeg = String(index);
+  });
+}
+
+function readParlayLegsFromForm() {
+  return [...els.parlayLegList.querySelectorAll(".parlay-leg")].map((row) => {
+    const value = (field) => row.querySelector(`[data-leg-field="${field}"]`)?.value || "";
+    return normalizeParlayLeg({
+      id: row.dataset.legId || makeId(),
+      matchName: value("matchName"),
+      matchDate: value("matchDate"),
+      marketType: value("marketType"),
+      pickName: value("pickName"),
+      odds: Number(value("odds")),
+      subjectiveProb: Number(value("subjectiveProb")),
+    });
+  });
+}
+
+function isCompleteParlayLeg(leg) {
+  return Boolean(leg.matchName && leg.pickName && leg.odds > 1);
+}
+
+function hasDuplicateParlayMatches(legs) {
+  const seen = new Set();
+  for (const leg of legs) {
+    const key = leg.matchName.trim().toLowerCase().replace(/\s+/g, " ");
+    if (!key) continue;
+    if (seen.has(key)) return true;
+    seen.add(key);
+  }
+  return false;
+}
+
+function updateParlayComputed() {
+  if (!els.parlayPanel || els.parlayPanel.classList.contains("hidden")) return;
+  const legs = readParlayLegsFromForm().filter(isUsableParlayLeg);
+  const completeLegs = legs.filter(isCompleteParlayLeg);
+  const odds = calculateParlayOdds(completeLegs);
+  const prob = calculateParlayJointProb(completeLegs);
+  const outflow = finite(document.querySelector("#actualOutflow").value, finite(document.querySelector("#stake").value, 0));
+  const payout = odds > 1 && outflow > 0 ? Math.round(outflow * odds) : 0;
+  els.parlayLegCount.textContent = `${completeLegs.length} 关`;
+  els.parlayOddsValue.textContent = odds > 1 ? NUMBER.format(odds) : "--";
+  els.parlayProbValue.textContent = prob > 0 ? `${NUMBER.format(prob)}%` : "--";
+  els.parlayPayoutValue.textContent = payout ? money(payout) : "--";
+  if (odds > 1 && payout) {
+    document.querySelector("#maxPayout").value = String(payout);
+  }
+  if (prob > 0) {
+    document.querySelector("#subjectiveProb").value = String(round1(prob));
+  }
+  if (!document.querySelector("#matchName").value.trim() && completeLegs.length >= 2) {
+    document.querySelector("#matchName").value = buildParlayName(completeLegs);
+  }
+  if (completeLegs.length >= 2) {
+    document.querySelector("#pickName").value = buildParlayPickName(completeLegs);
   }
 }
 
@@ -1500,6 +1841,8 @@ function buildOpenBetsSearchPayload() {
       matchName: bet.matchName,
       pickName: bet.pickName,
       marketType: bet.marketType,
+      betType: bet.betType,
+      parlayLegs: bet.parlayLegs,
       matchDate: bet.matchDate,
       stake: bet.actualOutflow,
       maxPayout: bet.maxPayout,
@@ -1540,9 +1883,12 @@ function buildAiPortfolioSummary() {
     openBets: analytics.open.map((bet) => ({
       matchName: bet.matchName,
       pickName: bet.pickName,
+      betType: bet.betType,
+      parlayLegs: bet.parlayLegs,
       outflow: bet.actualOutflow,
       maxPayout: bet.maxPayout,
-      adjustedProb: Math.round(bet.adjustedProb),
+      baseProb: round1(bet.baseProb),
+      adjustedProb: round1(bet.adjustedProb),
       expectedProfit: Math.round(bet.expectedProfit),
       riskScore: Math.round(bet.riskScore * 100),
     })),
@@ -1606,6 +1952,7 @@ function syncSettingsForm() {
 
 function exportCsv() {
   const header = [
+    "投注类型",
     "比赛",
     "日期",
     "选择",
@@ -1618,8 +1965,10 @@ function exportCsv() {
     "状态",
     "分组",
     "备注",
+    "过关明细",
   ];
   const rows = state.bets.map((bet) => [
+    betTypeMeta[bet.betType]?.label || "单关",
     bet.matchName,
     bet.matchDate,
     bet.pickName,
@@ -1632,6 +1981,7 @@ function exportCsv() {
     statusMeta[bet.status].label,
     bet.correlationGroup,
     bet.notes,
+    getParlayCsvText(bet),
   ]);
   downloadText(
     "betdogeye-ledger.csv",
@@ -1719,6 +2069,15 @@ function finite(value, fallback) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function round1(value) {
+  return Math.round(Number(value || 0) * 10) / 10;
+}
+
+function inputNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? String(Math.round(parsed * 1000) / 1000) : "";
 }
 
 function money(value) {
