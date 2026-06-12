@@ -646,6 +646,30 @@ textarea:focus {
   border-top: 1px solid var(--line);
 }
 
+.source-links {
+  display: grid;
+  gap: 8px;
+}
+
+.source-links a {
+  color: var(--cyan);
+  font-size: 0.86rem;
+  font-weight: 760;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.source-links a:hover {
+  text-decoration: underline;
+}
+
+.source-links small {
+  display: block;
+  margin-top: -5px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .table-panel {
   min-width: 0;
   overflow: hidden;

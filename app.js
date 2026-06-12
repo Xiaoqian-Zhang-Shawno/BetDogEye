@@ -118,10 +118,12 @@ const els = {
   deepseekModel: document.querySelector("#deepseekModel"),
   deepseekBaseUrl: document.querySelector("#deepseekBaseUrl"),
   saveDeepseekKeyBtn: document.querySelector("#saveDeepseekKeyBtn"),
+  refreshIntelBtn: document.querySelector("#refreshIntelBtn"),
   deepseekAnalyzeBtn: document.querySelector("#deepseekAnalyzeBtn"),
   aiConfigMessage: document.querySelector("#aiConfigMessage"),
   riskRadar: document.querySelector("#riskRadar"),
   factorList: document.querySelector("#factorList"),
+  webIntelList: document.querySelector("#webIntelList"),
   aiInsightList: document.querySelector("#aiInsightList"),
   settingsForm: document.querySelector("#settingsForm"),
   recommendations: document.querySelector("#recommendations"),
@@ -203,15 +205,18 @@ function bindEvents() {
     if (els.intelMatch.value === "portfolio") {
       state.intel = [];
       state.aiInsights = [];
+      state.webIntel = [];
     } else {
       state.intel = state.intel.filter((item) => item.matchId !== els.intelMatch.value);
       state.aiInsights = state.aiInsights.filter((item) => item.matchId !== els.intelMatch.value);
+      state.webIntel = state.webIntel.filter((item) => item.matchId !== els.intelMatch.value);
     }
     els.intelText.value = "";
     persistAndRender();
   });
 
   els.saveDeepseekKeyBtn.addEventListener("click", saveDeepseekConfig);
+  els.refreshIntelBtn.addEventListener("click", runWebIntelRefresh);
   els.deepseekAnalyzeBtn.addEventListener("click", runDeepseekAnalysis);
 
   els.settingsForm.addEventListener("submit", (event) => {
@@ -273,6 +278,7 @@ function normalizeState(input) {
     bets: Array.isArray(input.bets) ? input.bets.map(normalizeBet) : fallback.bets,
     intel: Array.isArray(input.intel) ? input.intel.map(normalizeIntel) : fallback.intel,
     aiInsights: Array.isArray(input.aiInsights) ? input.aiInsights.map(normalizeAiInsight) : fallback.aiInsights,
+    webIntel: Array.isArray(input.webIntel) ? input.webIntel.map(normalizeWebIntel) : fallback.webIntel,
     savedAt: input.savedAt || new Date().toISOString(),
   };
 }
@@ -369,6 +375,7 @@ function createDemoState() {
       },
     ],
     aiInsights: [],
+    webIntel: [],
     savedAt: new Date().toISOString(),
   };
 }
@@ -425,6 +432,29 @@ function normalizeAiFactor(factor) {
     confidence: clamp(finite(factor.confidence, 0.5), 0, 1),
     evidence: String(factor.evidence || ""),
     action: String(factor.action || ""),
+  };
+}
+
+function normalizeWebIntel(item) {
+  return {
+    id: item.id || makeId(),
+    matchId: item.matchId || "portfolio",
+    createdAt: item.createdAt || new Date().toISOString(),
+    summary: String(item.summary || ""),
+    searchQuery: String(item.searchQuery || ""),
+    intelText: String(item.intelText || ""),
+    sources: Array.isArray(item.sources) ? item.sources.map(normalizeIntelSource) : [],
+    nextSteps: Array.isArray(item.nextSteps) ? item.nextSteps.map(String) : [],
+  };
+}
+
+function normalizeIntelSource(source) {
+  return {
+    title: String(source.title || ""),
+    url: String(source.url || ""),
+    source: String(source.source || ""),
+    publishedAt: String(source.publishedAt || ""),
+    relevance: clamp(finite(source.relevance, 0), 0, 100),
   };
 }
 
@@ -834,6 +864,7 @@ function renderRiskBoard() {
   );
   renderRadar(factors);
   renderFactorList(factors);
+  renderWebIntelList();
   renderAiInsightList();
 }
 
@@ -936,6 +967,44 @@ function renderAiInsightList() {
             <span class="risk-tag ${riskClass}">${NUMBER.format(insight.upsetRiskScore)}</span>
           </header>
           <p>${escapeHtml(notes || "暂无额外策略说明")}</p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderWebIntelList() {
+  const records = (state.webIntel || []).slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (!records.length) {
+    els.webIntelList.innerHTML = empty("网络刷新来源会在这里显示");
+    return;
+  }
+  els.webIntelList.innerHTML = records
+    .slice(0, 4)
+    .map((record) => {
+      const matchName =
+        record.matchId === "portfolio"
+          ? "全部组合"
+          : state.bets.find((bet) => bet.id === record.matchId)?.matchName || "未知比赛";
+      const sourceRows = record.sources
+        .slice(0, 4)
+        .map((source) => {
+          const label = [source.source, source.publishedAt].filter(Boolean).join(" · ");
+          return `<a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(
+            source.title || source.url
+          )}</a><small>${escapeHtml(label)}</small>`;
+        })
+        .join("");
+      return `
+        <article class="factor-card source-card">
+          <header>
+            <div>
+              <strong>网络情报：${escapeHtml(matchName)}</strong>
+              <p>${escapeHtml(record.summary || "已刷新公开新闻来源")}</p>
+            </div>
+            <span class="mini-badge">${record.sources.length} 来源</span>
+          </header>
+          <div class="source-links">${sourceRows}</div>
         </article>
       `;
     })
@@ -1273,6 +1342,50 @@ async function runDeepseekAnalysis() {
   } finally {
     els.deepseekAnalyzeBtn.disabled = false;
     els.deepseekAnalyzeBtn.textContent = "DeepSeek 分析";
+  }
+}
+
+async function runWebIntelRefresh() {
+  if (els.deepseekKey.value.trim()) {
+    const saved = await saveDeepseekConfig();
+    if (!saved) return;
+  }
+  const selected = getSelectedMatchContext();
+  els.refreshIntelBtn.disabled = true;
+  els.refreshIntelBtn.textContent = "刷新中...";
+  setAiMessage("正在搜索公开新闻并生成情报文本。", "info");
+  try {
+    const response = await fetch("/api/intel/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        matchId: selected.matchId,
+        matchName: selected.matchName,
+        pickName: selected.pickName,
+        query: els.intelText.value.trim().slice(0, 120),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "刷新失败");
+    const record = normalizeWebIntel({
+      id: makeId(),
+      matchId: selected.matchId,
+      createdAt: new Date().toISOString(),
+      summary: data.summary,
+      searchQuery: data.searchQuery,
+      intelText: data.intelText,
+      sources: data.sources || data.rawSources || [],
+      nextSteps: data.nextSteps,
+    });
+    state.webIntel.unshift(record);
+    els.intelText.value = record.intelText;
+    persistAndRender();
+    setAiMessage(`已生成网络情报，引用 ${record.sources.length} 个来源。`, "good");
+  } catch (error) {
+    setAiMessage(`网络情报刷新失败：${error.message}`, "bad");
+  } finally {
+    els.refreshIntelBtn.disabled = false;
+    els.refreshIntelBtn.textContent = "刷新网络情报";
   }
 }
 

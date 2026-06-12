@@ -339,12 +339,13 @@
                 ></textarea>
               </label>
               <div class="form-actions">
+                <button id="refreshIntelBtn" class="button ghost" type="button">刷新网络情报</button>
                 <button class="button primary" type="submit">挖掘风险因子</button>
                 <button id="deepseekAnalyzeBtn" class="button ghost" type="button">DeepSeek 分析</button>
                 <button id="clearIntelBtn" class="button ghost" type="button">清空情报</button>
               </div>
               <p class="fine-print">
-                DeepSeek 请求只会发送你粘贴的情报、当前比赛名称和组合摘要，不会发送完整本地备份。
+                刷新网络情报会查询公开新闻 RSS，并把搜索结果标题、摘要和链接交给 DeepSeek 归纳。
               </p>
             </form>
 
@@ -366,6 +367,7 @@
                   </div>
                 </div>
                 <div id="factorList" class="factor-list"></div>
+                <div id="webIntelList" class="factor-list ai-insights"></div>
                 <div id="aiInsightList" class="factor-list ai-insights"></div>
               </article>
             </div>

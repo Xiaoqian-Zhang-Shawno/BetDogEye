@@ -8,23 +8,27 @@ process environment or from .env.local in this workspace.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 import urllib.error
 import urllib.request
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
 ENV_FILE = ROOT / ".env.local"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
+NEWS_TIMEOUT_SECONDS = 8
+MAX_NEWS_ITEMS = 12
 
 
 def read_local_env() -> dict[str, str]:
@@ -98,7 +102,7 @@ def normalize_base_url(base_url: str) -> str:
     return base_url.rstrip("/")
 
 
-def call_deepseek(payload: dict[str, Any]) -> dict[str, Any]:
+def request_deepseek_json(messages: list[dict[str, str]], temperature: float = 0.2) -> dict[str, Any]:
     config = get_config()
     api_key = config["api_key"].strip()
     if not api_key:
@@ -109,8 +113,8 @@ def call_deepseek(payload: dict[str, Any]) -> dict[str, Any]:
     request_body = json.dumps(
         {
             "model": config["model"] or DEFAULT_MODEL,
-            "messages": build_messages(payload),
-            "temperature": 0.2,
+            "messages": messages,
+            "temperature": temperature,
             "stream": False,
             "response_format": {"type": "json_object"},
         },
@@ -136,6 +140,51 @@ def call_deepseek(payload: dict[str, Any]) -> dict[str, Any]:
         "baseUrl": base_url,
         "provider": "deepseek",
     }
+    return parsed
+
+
+def call_deepseek(payload: dict[str, Any]) -> dict[str, Any]:
+    return request_deepseek_json(build_messages(payload), temperature=0.2)
+
+
+def call_deepseek_intel_refresh(payload: dict[str, Any], news_items: list[dict[str, str]]) -> dict[str, Any]:
+    match_name = str(payload.get("matchName") or "未指定比赛")
+    pick_name = str(payload.get("pickName") or "未指定投注方向")
+    search_query = str(payload.get("query") or "").strip()
+    system = (
+        "你是一个赛前情报整理助手。你只能基于提供的新闻搜索结果归纳，"
+        "不要编造未在搜索结果中出现的信息。不要预测具体比分。必须输出严格 JSON。"
+    )
+    user = {
+        "任务": "根据新闻搜索结果生成一段可用于后续投注风险分析的情报文本。",
+        "比赛": match_name,
+        "投注方向": pick_name,
+        "用户补充查询": search_query,
+        "新闻搜索结果": news_items,
+        "输出格式": {
+            "intelText": "180到350字中文情报文本，覆盖伤停、阵容、赛程、士气、市场异常等已出现信号；没有证据就写暂无明确公开信号",
+            "summary": "60字以内摘要",
+            "searchQuery": "你认为最有效的查询词",
+            "sources": [
+                {
+                    "title": "来源标题",
+                    "url": "来源链接",
+                    "source": "媒体或搜索源",
+                    "publishedAt": "发布时间，未知则为空",
+                    "relevance": "0到100数字",
+                }
+            ],
+            "nextSteps": ["建议用户继续核实的事项，每条不超过30字"],
+        },
+    }
+    parsed = request_deepseek_json(
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+        ],
+        temperature=0.15,
+    )
+    parsed["rawSources"] = news_items
     return parsed
 
 
@@ -178,6 +227,94 @@ def build_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
     ]
+
+
+def refresh_news_items(payload: dict[str, Any]) -> list[dict[str, str]]:
+    match_name = str(payload.get("matchName") or "").strip()
+    pick_name = str(payload.get("pickName") or "").strip()
+    custom_query = str(payload.get("query") or "").strip()
+    base = custom_query or " ".join(part for part in [match_name, pick_name] if part)
+    if not base:
+        raise ValueError("matchName or query is required")
+
+    queries = [
+        base,
+        f"{base} 伤病 停赛 阵容",
+        f"{base} 更衣室 内讧 士气",
+        f"{base} 赔率 爆冷 盘口",
+    ]
+    seen: set[str] = set()
+    items: list[dict[str, str]] = []
+    for query in queries:
+        for feed_name, url in build_news_feed_urls(query):
+            for item in fetch_rss_items(feed_name, url, query):
+                fingerprint = (item["title"].lower(), item["url"].split("?")[0])
+                key = "|".join(fingerprint)
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append(item)
+                if len(items) >= MAX_NEWS_ITEMS:
+                    return items
+    return items
+
+
+def build_news_feed_urls(query: str) -> list[tuple[str, str]]:
+    encoded = quote(query)
+    return [
+        ("Bing News", f"https://www.bing.com/news/search?q={encoded}&format=rss&mkt=zh-CN"),
+        (
+            "Google News",
+            f"https://news.google.com/rss/search?q={encoded}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+        ),
+    ]
+
+
+def fetch_rss_items(feed_name: str, url: str, query: str) -> list[dict[str, str]]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "BetDogEye/1.0 (+https://github.com/Xiaoqian-Zhang-Shawno/BetDogEye)",
+            "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=NEWS_TIMEOUT_SECONDS) as response:
+            raw = response.read()
+    except Exception:
+        return []
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return []
+
+    results: list[dict[str, str]] = []
+    for item in root.findall(".//item"):
+        title = clean_text(item.findtext("title"))
+        link = clean_text(item.findtext("link"))
+        description = clean_text(item.findtext("description"))
+        published_at = clean_text(item.findtext("pubDate"))
+        source = clean_text(item.findtext("source")) or feed_name
+        if not title or not link:
+            continue
+        results.append(
+            {
+                "title": title[:220],
+                "url": link,
+                "snippet": description[:420],
+                "publishedAt": published_at,
+                "source": source,
+                "query": query,
+            }
+        )
+    return results
+
+
+def clean_text(value: str | None) -> str:
+    text = html.unescape(value or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 class AppHandler(SimpleHTTPRequestHandler):
@@ -228,6 +365,21 @@ class AppHandler(SimpleHTTPRequestHandler):
                     self.send_json({"error": "text is required"}, HTTPStatus.BAD_REQUEST)
                     return
                 self.send_json(call_deepseek(data))
+                return
+
+            if parsed.path == "/api/intel/refresh":
+                data = parse_json_body(self)
+                news_items = refresh_news_items(data)
+                if not news_items:
+                    self.send_json(
+                        {
+                            "error": "No recent news results found",
+                            "hint": "Try adding team names in Chinese and English, or paste manual intel text.",
+                        },
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self.send_json(call_deepseek_intel_refresh(data, news_items))
                 return
 
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
