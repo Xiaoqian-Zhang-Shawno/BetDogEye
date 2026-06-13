@@ -1,6 +1,8 @@
 "use strict";
 
 const STORE_KEY = "betdogeye.state.v1";
+const DRAFT_STORE_KEY = "betdogeye.drafts.v1";
+const DRAFT_SAVE_DELAY = 250;
 const MONEY = new Intl.NumberFormat("zh-CN", {
   style: "currency",
   currency: "CNY",
@@ -92,6 +94,10 @@ const factorRules = [
 const severeWords = ["核心", "主力", "门将", "队长", "重伤", "罢训", "内讧", "缺阵", "停赛", "异常"];
 
 const state = loadState();
+const drafts = loadDraftState();
+let draftSaveTimer = 0;
+let settingsSaveTimer = 0;
+let restoringDrafts = false;
 
 const els = {
   navTabs: document.querySelector("#navTabs"),
@@ -173,8 +179,9 @@ init();
 function init() {
   bindEvents();
   syncSettingsForm();
-  resetBetForm();
+  resetBetForm({ keepDraft: true });
   render();
+  restoreFormDrafts();
   refreshDeepseekStatus();
 
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
@@ -247,6 +254,7 @@ function bindEvents() {
       state.webIntel = state.webIntel.filter((item) => item.matchId !== els.intelMatch.value);
     }
     els.intelText.value = "";
+    clearIntelDraft();
     persistAndRender();
   });
 
@@ -260,6 +268,8 @@ function bindEvents() {
     event.preventDefault();
     saveSettings();
   });
+  els.settingsForm.addEventListener("input", scheduleSettingsAutosave);
+  els.settingsForm.addEventListener("change", scheduleSettingsAutosave);
 
   els.exportCsvBtn.addEventListener("click", exportCsv);
   els.exportJsonBtn.addEventListener("click", exportJson);
@@ -267,6 +277,8 @@ function bindEvents() {
     const demo = createDemoState();
     Object.assign(state, demo);
     syncSettingsForm();
+    clearBetDraft();
+    clearIntelDraft();
     resetBetForm();
     persistAndRender();
   });
@@ -275,6 +287,11 @@ function bindEvents() {
 
   document.querySelector("#stake").addEventListener("input", mirrorOutflowWhenEmpty);
   document.querySelector("#stake").addEventListener("input", updateParlayComputed);
+  els.betForm.addEventListener("input", scheduleDraftAutosave);
+  els.betForm.addEventListener("change", scheduleDraftAutosave);
+  els.intelForm.addEventListener("input", scheduleDraftAutosave);
+  els.intelForm.addEventListener("change", scheduleDraftAutosave);
+  window.addEventListener("beforeunload", saveFormDrafts);
 }
 
 function setView(view) {
@@ -302,6 +319,18 @@ function loadState() {
     console.warn("Failed to load state", error);
   }
   return createDemoState();
+}
+
+function loadDraftState() {
+  try {
+    const saved = localStorage.getItem(DRAFT_STORE_KEY);
+    if (!saved) return {};
+    const parsed = JSON.parse(saved);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    console.warn("Failed to load form drafts", error);
+    return {};
+  }
 }
 
 function normalizeState(input) {
@@ -553,9 +582,159 @@ function normalizeIntelSource(source) {
   };
 }
 
+function persistDraftState() {
+  try {
+    if (!drafts.betForm && !drafts.intelForm) {
+      localStorage.removeItem(DRAFT_STORE_KEY);
+      return;
+    }
+    localStorage.setItem(DRAFT_STORE_KEY, JSON.stringify(drafts));
+  } catch (error) {
+    console.warn("Failed to save form drafts", error);
+  }
+}
+
+function scheduleDraftAutosave() {
+  if (restoringDrafts) return;
+  window.clearTimeout(draftSaveTimer);
+  draftSaveTimer = window.setTimeout(saveFormDrafts, DRAFT_SAVE_DELAY);
+}
+
+function saveFormDrafts() {
+  if (restoringDrafts) return;
+  saveBetDraft();
+  saveIntelDraft();
+  persistDraftState();
+}
+
+function collectBetDraft() {
+  const fields = {};
+  formFields.forEach((id) => {
+    const node = document.querySelector(`#${id}`);
+    if (node) fields[id] = node.value;
+  });
+  return {
+    fields,
+    parlayLegs: readParlayLegsFromForm(),
+  };
+}
+
+function saveBetDraft() {
+  const draft = collectBetDraft();
+  if (hasMeaningfulBetDraft(draft)) {
+    drafts.betForm = {
+      ...draft,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    delete drafts.betForm;
+  }
+}
+
+function hasMeaningfulBetDraft(draft) {
+  if (!draft || !draft.fields) return false;
+  const fields = draft.fields;
+  const meaningfulFields = [
+    "betId",
+    "matchName",
+    "pickName",
+    "stake",
+    "maxPayout",
+    "actualOutflow",
+    "actualIncome",
+    "correlationGroup",
+    "betNotes",
+  ];
+  return (
+    meaningfulFields.some((key) => String(fields[key] || "").trim()) ||
+    (fields.betType === "parlay" && Array.isArray(draft.parlayLegs) && draft.parlayLegs.some(isUsableParlayLeg))
+  );
+}
+
+function restoreFormDrafts() {
+  restoringDrafts = true;
+  try {
+    restoreBetDraft();
+    restoreIntelDraft();
+  } finally {
+    restoringDrafts = false;
+  }
+}
+
+function restoreBetDraft() {
+  const draft = drafts.betForm;
+  if (!hasMeaningfulBetDraft(draft)) return;
+  const fields = draft.fields || {};
+  formFields.forEach((id) => {
+    const node = document.querySelector(`#${id}`);
+    if (!node || !Object.prototype.hasOwnProperty.call(fields, id)) return;
+    node.value = fields[id];
+  });
+  const betType = fields.betType === "parlay" ? "parlay" : "single";
+  document.querySelector("#betType").value = betType;
+  if (betType === "parlay") {
+    const legs = Array.isArray(draft.parlayLegs) && draft.parlayLegs.length ? draft.parlayLegs.map(normalizeParlayLeg) : createEmptyParlayLegs();
+    renderParlayLegRows(legs);
+  } else {
+    renderParlayLegRows(createEmptyParlayLegs());
+  }
+  updateBetTypeUi();
+  updateParlayComputed();
+  els.betFormTitle.textContent = fields.betId ? "编辑下注草稿" : "新增下注草稿";
+  els.deleteBetBtn.classList.toggle("hidden", !fields.betId);
+}
+
+function clearBetDraft() {
+  if (!drafts.betForm) return;
+  delete drafts.betForm;
+  persistDraftState();
+}
+
+function saveIntelDraft() {
+  const text = els.intelText.value.trim();
+  const matchId = els.intelMatch.value || "portfolio";
+  const sourceReliability = els.sourceReliability.value || "0.75";
+  if (text || matchId !== "portfolio" || sourceReliability !== "0.75") {
+    drafts.intelForm = {
+      matchId,
+      sourceReliability,
+      text: els.intelText.value,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    delete drafts.intelForm;
+  }
+}
+
+function restoreIntelDraft() {
+  const draft = drafts.intelForm;
+  if (!draft) return;
+  if ([...els.intelMatch.options].some((option) => option.value === draft.matchId)) {
+    els.intelMatch.value = draft.matchId;
+  }
+  els.sourceReliability.value = draft.sourceReliability || "0.75";
+  els.intelText.value = draft.text || "";
+}
+
+function clearIntelDraft() {
+  if (!drafts.intelForm) return;
+  delete drafts.intelForm;
+  persistDraftState();
+}
+
+function scheduleSettingsAutosave() {
+  if (restoringDrafts) return;
+  window.clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = window.setTimeout(() => saveSettings({ silent: true }), DRAFT_SAVE_DELAY);
+}
+
 function persistAndRender() {
   state.savedAt = new Date().toISOString();
-  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn("Failed to save state", error);
+  }
   render();
 }
 
@@ -1397,6 +1576,7 @@ function getBetFormValue() {
 function editBet(id) {
   const bet = state.bets.find((item) => item.id === id);
   if (!bet) return;
+  clearBetDraft();
   document.querySelector("#betId").value = bet.id;
   document.querySelector("#betType").value = bet.betType || "single";
   document.querySelector("#matchName").value = bet.matchName;
@@ -1419,7 +1599,7 @@ function editBet(id) {
   setView("ledger");
 }
 
-function resetBetForm() {
+function resetBetForm(options = {}) {
   formFields.forEach((id) => {
     const node = document.querySelector(`#${id}`);
     if (!node) return;
@@ -1435,6 +1615,9 @@ function resetBetForm() {
   updateBetTypeUi();
   els.betFormTitle.textContent = "新增下注";
   els.deleteBetBtn.classList.add("hidden");
+  if (!options.keepDraft) {
+    clearBetDraft();
+  }
 }
 
 function mirrorOutflowWhenEmpty() {
@@ -1616,6 +1799,7 @@ function saveIntelFromForm() {
     factors: mineFactors(text, reliability),
   });
   els.intelText.value = "";
+  clearIntelDraft();
   persistAndRender();
 }
 
@@ -1776,6 +1960,8 @@ async function runWebIntelRefresh() {
     });
     state.webIntel.unshift(record);
     els.intelText.value = record.intelText;
+    saveIntelDraft();
+    persistDraftState();
     persistAndRender();
     setAiMessage(`已生成网络情报，引用 ${record.sources.length} 个来源。`, "good");
   } catch (error) {
@@ -1823,6 +2009,8 @@ async function runOpenBetsIntelRefresh() {
     state.webIntel.unshift(record);
     els.intelMatch.value = "portfolio";
     els.intelText.value = record.intelText;
+    saveIntelDraft();
+    persistDraftState();
     persistAndRender();
     setAiMessage(`已刷新未结算组合，引用 ${record.sources.length} 个相关来源。`, "good");
   } catch (error) {
@@ -1931,7 +2119,7 @@ function mineFactors(text, reliability = 0.75) {
   return [...merged.values()];
 }
 
-function saveSettings() {
+function saveSettings(options = {}) {
   state.bankroll = finite(document.querySelector("#bankroll").value, state.bankroll);
   state.perMatchCapPct = finite(document.querySelector("#perMatchCapPct").value, state.perMatchCapPct);
   state.stopLoss = finite(document.querySelector("#stopLoss").value, state.stopLoss);
@@ -1939,6 +2127,9 @@ function saveSettings() {
   state.riskProfile = document.querySelector("#riskProfile").value;
   state.maxPortfolioRiskPct = finite(document.querySelector("#maxPortfolioRiskPct").value, state.maxPortfolioRiskPct);
   persistAndRender();
+  if (!options.silent) {
+    saveFormDrafts();
+  }
 }
 
 function syncSettingsForm() {
@@ -2003,6 +2194,8 @@ function importJson(event) {
       const imported = normalizeState(JSON.parse(String(reader.result)));
       Object.assign(state, imported);
       syncSettingsForm();
+      clearBetDraft();
+      clearIntelDraft();
       resetBetForm();
       persistAndRender();
     } catch (error) {
