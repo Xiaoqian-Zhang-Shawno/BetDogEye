@@ -1,8 +1,14 @@
 # BetDogEye
 
-> 中文 | [English](#english)
+![BetDogEye 漫画封面，杜宾犬分析员在球场边用镜片查看台账](assets/readme/hero.webp)
+
+**简体中文** · [English](#english)
+
+**从投注台账到组合风险，一处查看敞口、收益和资金纪律。**
 
 BetDogEye 是一个本地优先的体育投注组合分析前端，用于记录胜负类投注、测算收益风险、刷新公开风险情报，并从资金管理角度生成仓位、止损和对冲建议。项目默认使用浏览器本地存储和本地 Python 代理，不会把 API Key 写进前端代码。
+
+[快速启动](#快速启动) · [使用流程](#使用流程) · [关键算法](#关键算法说明) · [隐私与安全](#隐私与安全)
 
 理性使用：本项目只提供记录、测算、风险提示和信息整理，不保证盈利，不提供比分预测，也不构成投资、博彩或法律建议。
 
@@ -162,6 +168,10 @@ LLM_MODEL=provider-model-name
 - 如果模型鉴权失败，先检查 API Key、Base URL、模型名和账户可用额度。
 
 ## 使用流程
+
+![资金设置与投注记录在浏览器本地存储，供收益和风险分析。按需刷新情报时，由本地 Python 代理查询公开新闻并调用模型。](assets/readme/workflow-zh.webp)
+
+[可编辑源图（draw.io）](assets/readme/workflow-zh.drawio)
 
 ### 1. 设置资金参数
 
@@ -481,6 +491,10 @@ Notes:
 - If authentication fails, check API key, Base URL, model name, and account quota.
 
 ## Usage Flow
+
+![Budget and records stay in browser storage for local return and risk analysis. Optional intel refresh queries public news and a model through the local Python proxy.](assets/readme/workflow-en.webp)
+
+[Editable source (draw.io)](assets/readme/workflow-en.drawio)
 
 1. Configure bankroll settings on the Strategy page: budget, per-match cap, stop-loss line, hedge reference odds, risk profile, and maximum exposure.
 2. Add bet records on the Bet Ledger page. Single bets use the classic fields. Mixed pass records require at least two legs, each with match, market, pick, leg odds, and leg probability.
