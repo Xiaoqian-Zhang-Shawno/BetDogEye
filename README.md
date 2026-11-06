@@ -2,21 +2,31 @@
 
 ![BetDogEye 漫画封面，杜宾犬分析员在球场边用镜片查看台账](assets/readme/hero.webp)
 
+![本地台账、组合风控、Python 3.10+](assets/readme/product-strip.svg)
+
 **简体中文** · [English](#english)
 
 **从投注台账到组合风险，一处查看敞口、收益和资金纪律。**
 
 BetDogEye 是一个本地优先的体育投注组合分析前端，用于记录胜负类投注、测算收益风险、刷新公开风险情报，并从资金管理角度生成仓位、止损和对冲建议。项目默认使用浏览器本地存储和本地 Python 代理，不会把 API Key 写进前端代码。
 
-[快速启动](#快速启动) · [使用流程](#使用流程) · [关键算法](#关键算法说明) · [隐私与安全](#隐私与安全)
+[快速启动](#快速启动) · [产品导览](#产品导览) · [使用流程](#使用流程) · [关键算法](#关键算法说明) · [隐私与安全](#隐私与安全)
 
 理性使用：本项目只提供记录、测算、风险提示和信息整理，不保证盈利，不提供比分预测，也不构成投资、博彩或法律建议。
 
-## 支持作者
+## 产品导览
 
-如果你觉得有用，请支持一下作者，这样作者会更有动力哦！感谢！
+| 页面 | 先看什么 | 能回答的问题 |
+| --- | --- | --- |
+| 仪表盘 | 未结算敞口、已实现盈亏、比赛敞口图 | 有多少资金仍未结算，敞口集中在哪些比赛？ |
+| 下注记录 | 单关或过关、实际支出与收入、结算状态 | 哪些数字来自实际现金流，哪些是可能派彩？ |
+| 风险情报 | 本地规则、带来源的网络条目、可选模型分析 | 哪些风险线索已录入，哪些需要核查？ |
+| 策略建议 | 预算、止损线、单场上限与组合敞口 | 按已设资金纪律，哪里出现超限或集中暴露？ |
 
-<img src="assets/support-alipay.jpg" alt="支付宝支持作者" width="260" />
+> [!TIP]
+> 从初始示例数据开始。修改一条记录的支出或结算状态，观察敞口和已实现盈亏的变化。更换浏览器、配置文件或端口前，可先导出 JSON 备份。
+
+**读懂几个容易混淆的数字。** 未结算敞口是未结算记录的实际支出之和。已实现盈亏只统计已结算记录。整体 ROI 使用全部实际收入与支出。EV 与 Kelly 取决于录入的胜率及风险调整，过关概率相乘是估算假设，关次相关时需要单独复核。
 
 ## 功能概览
 
@@ -169,7 +179,7 @@ LLM_MODEL=provider-model-name
 
 ## 使用流程
 
-![资金设置与投注记录在浏览器本地存储，供收益和风险分析。按需刷新情报时，由本地 Python 代理查询公开新闻并调用模型。](assets/readme/workflow-zh.webp)
+[![资金设置与投注记录在浏览器本地存储，供收益和风险分析。按需刷新情报时，由本地 Python 代理查询公开新闻并调用模型。](assets/readme/workflow-zh.webp)](assets/readme/workflow-zh.webp)
 
 [可编辑源图（draw.io）](assets/readme/workflow-zh.drawio)
 
@@ -323,6 +333,12 @@ LLM_MODEL=provider-model-name
 
 也可以在页面的「模型 API」配置区域修改并保存。
 
+## 支持作者
+
+如果你觉得有用，请支持一下作者，这样作者会更有动力哦！感谢！
+
+<img src="assets/support-alipay.jpg" alt="支付宝支持作者" width="260" />
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).
@@ -331,15 +347,25 @@ MIT License. See [LICENSE](LICENSE).
 
 ## English
 
+[Quick start](#quick-start) · [Product tour](#product-tour) · [Usage flow](#usage-flow) · [Core calculations](#core-calculations) · [Privacy and security](#privacy-and-security)
+
 BetDogEye is a local-first betting portfolio analysis frontend for win/loss sports bets. It helps you record stakes, estimate return and risk, refresh public risk intelligence, and generate bankroll, stop-loss, and hedging suggestions. The project uses browser local storage and a local Python proxy by default. API keys are never embedded in frontend code.
 
 Responsible use: this project only provides record keeping, calculations, risk reminders, and information organization. It does not guarantee profit, does not predict exact scores, and is not investment, gambling, or legal advice.
 
-## Support The Author
+## Product Tour
 
-If you find this project useful, please consider supporting the author. Your support helps keep the project moving. Thank you!
+| View | What to check first | What it answers |
+| --- | --- | --- |
+| Dashboard | Open exposure, realized profit, and exposure by match | How much is still at risk, and where is it concentrated? |
+| Bet Ledger | Single or parlay, actual cash flows, and settlement status | Which figures are recorded cash flows and which are possible payouts? |
+| Risk Intelligence | Local rules, linked news, and optional model analysis | Which signals are recorded, and which need source review? |
+| Strategy | Budget, stop-loss line, per-match cap, and exposure | Where does the recorded portfolio exceed the configured limits? |
 
-<img src="assets/support-alipay.jpg" alt="Support the author via Alipay" width="260" />
+> [!TIP]
+> Start with the sample data. Edit a record's outflow or settlement status and see how open exposure and realized profit respond. Export a JSON backup before changing browser profiles or ports.
+
+**Read the metrics in context.** Open exposure sums actual outflow on unsettled records. Realized profit uses settled records only. Overall ROI compares all actual income and outflow. EV and Kelly depend on the probabilities entered and the risk adjustment. Multiplying parlay leg probabilities is an estimation assumption that needs extra scrutiny when legs are correlated.
 
 ## Features
 
@@ -492,7 +518,7 @@ Notes:
 
 ## Usage Flow
 
-![Budget and records stay in browser storage for local return and risk analysis. Optional intel refresh queries public news and a model through the local Python proxy.](assets/readme/workflow-en.webp)
+[![Budget and records stay in browser storage for local return and risk analysis. Optional intel refresh queries public news and a model through the local Python proxy.](assets/readme/workflow-en.webp)](assets/readme/workflow-en.webp)
 
 [Editable source (draw.io)](assets/readme/workflow-en.drawio)
 
@@ -599,6 +625,12 @@ LLM_MODEL=provider-model-name
 ```
 
 You can also update the configuration in the Model API panel inside the app.
+
+## Support The Author
+
+If you find this project useful, please consider supporting the author. Your support helps keep the project moving. Thank you!
+
+<img src="assets/support-alipay.jpg" alt="Support the author via Alipay" width="260" />
 
 ## License
 

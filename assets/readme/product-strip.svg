@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 401 35" width="401" height="35" role="img">
+<path d="M8 2H123L115 28H0Z" fill="#FF847A"/>
+<path d="M3 32H115" stroke="#FF847A" stroke-width="2"/>
+<text x="61.5" y="19" fill="#12373A" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" letter-spacing=".6">LOCAL LEDGER</text>
+<path d="M139 2H270L262 28H131Z" fill="#12373A"/>
+<path d="M134 32H262" stroke="#FF847A" stroke-width="2"/>
+<text x="200.5" y="19" fill="#FFFFFF" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" letter-spacing=".6">PORTFOLIO RISK</text>
+<path d="M286 2H401L393 28H278Z" fill="#12373A"/>
+<path d="M281 32H393" stroke="#FF847A" stroke-width="2"/>
+<text x="339.5" y="19" fill="#FFFFFF" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" letter-spacing=".6">PYTHON 3.10+</text>
+</svg>
